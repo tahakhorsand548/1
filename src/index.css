@@ -1,0 +1,65 @@
+@import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+/* Customize theme values for modern Persian / English hybrid interface */
+@theme {
+  --font-sans: "Vazirmatn", "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: #f8fafc; /* Beautiful soft slate-50 background for Sleek Interface */
+  color: #0f172a;
+  direction: rtl;
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+}
+
+/* RTL Helpers & Custom Sleek Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+/* Custom animation timings */
+@keyframes pulseGlow {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 0.8;
+  }
+}
+
+.glow-animation {
+  animation: pulseGlow 4s infinite ease-in-out;
+}
+
+/* Beautiful dynamic phone mockup styling */
+.phone-mockup-frame {
+  box-shadow: 0px 25px 50px -12px rgba(0, 0, 0, 0.7);
+}
+
+/* Custom cards styling */
+.glass-effect {
+  background: oklch(16.868% 0.02976 273.627 / 0.884);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
