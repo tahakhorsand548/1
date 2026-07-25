@@ -125,9 +125,12 @@ const filteredUsers = usersList.filter((u) => {
   // گزارش کامل وضعیت اشتراک همه‌ی کاربران (تاریخ ثبت‌نام / پلن فعلی / بازه اعتبار)
   const [subscriptionsOverview, setSubscriptionsOverview] = React.useState<any[]>([]);
 
-  // مودال «افزودن پلن» — فعال‌سازی مستقیم اشتراک برای یک کاربر توسط ادمین
-  const [showActivatePlanModal, setShowActivatePlanModal] = React.useState(false);
-  const [activatePlanUsername, setActivatePlanUsername] = React.useState("");
+  // تب فعال داخل مودال «مدیریت کاربر» (ویرایش مشخصات / لایسنس و خریدها / کیوآرکد)
+  const [editUserModalTab, setEditUserModalTab] = React.useState<
+    "profile" | "license" | "qr"
+  >("profile");
+
+  // پلن انتخاب‌شده برای افزودن لایسنس مستقیم به همین کاربر (داخل تب لایسنس)
   const [activatePlanCode, setActivatePlanCode] = React.useState<
     "7d" | "1m" | "3m" | "6m" | "1y"
   >("1m");
@@ -698,16 +701,13 @@ const filteredUsers = usersList.filter((u) => {
 
       };
 
-      // فعال‌سازی مستقیم پلن برای یک کاربر (بدون نیاز به رسید کارت‌به‌کارت)
+      // فعال‌سازی مستقیم پلن برای کاربری که مودال مدیریتش باز است
       const handleActivatePlan = async () => {
-        if (!activatePlanUsername) {
-          alert("لطفا یک کاربر را انتخاب کنید.");
-          return;
-        }
+        if (!editingUser) return;
         setActivatePlanLoading(true);
         try {
           const res = await apiFetch(
-            `/api/admin/users/${activatePlanUsername}/activate-plan`,
+            `/api/admin/users/${editingUser.username}/activate-plan`,
             {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -716,9 +716,7 @@ const filteredUsers = usersList.filter((u) => {
           );
           const data = await res.json();
           if (res.ok && data.success) {
-            alert("پلن با موفقیت برای کاربر فعال شد.");
-            setShowActivatePlanModal(false);
-            setActivatePlanUsername("");
+            alert("لایسنس با موفقیت برای کاربر فعال شد.");
             fetchAdminData();
           } else {
             alert(data.message || "خطا در فعال‌سازی پلن.");
@@ -1145,9 +1143,13 @@ const filteredUsers = usersList.filter((u) => {
                                 setEditEmail(u.email);
                                 setEditPhone(u.phone);
                                 setEditPassword("");
+                                setEditUserModalTab("profile");
+                                setActivatePlanCode("1m");
+                                setSelectedQrUser(u);
+                                setUploadedQrBase64(u.qrImageUrl || "");
                               }}
                               className="p-1 rounded bg-slate-800 text-slate-300 hover:text-white"
-                              title="ویرایش مشخصات"
+                              title="مدیریت کاربر (ویرایش / لایسنس / کیوآرکد)"
                             >
                               <Edit className="w-3.5 h-3.5" />
                             </button>
@@ -1549,26 +1551,15 @@ const filteredUsers = usersList.filter((u) => {
 
             {/* ── گزارش وضعیت اشتراک کاربران (ثبت‌نام / پلن فعلی / بازه اعتبار) ── */}
             <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6">
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-6">
-                <div>
-                  <h2 className="text-xl font-bold text-white">
-                    وضعیت اشتراک کاربران
-                  </h2>
-                  <p className="text-xs text-slate-500 mt-1">
-                    تاریخ ثبت‌نام، پلن فعلی و بازه اعتبار اشتراک هر کاربر
-                  </p>
-                </div>
-                <button
-                  onClick={() => {
-                    setActivatePlanUsername("");
-                    setActivatePlanCode("1m");
-                    setShowActivatePlanModal(true);
-                  }}
-                  className="flex items-center gap-1.5 py-2.5 px-5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all"
-                >
-                  <Plus className="w-4 h-4" />
-                  افزودن پلن برای کاربر
-                </button>
+              <div className="mb-6">
+                <h2 className="text-xl font-bold text-white">
+                  وضعیت اشتراک کاربران
+                </h2>
+                <p className="text-xs text-slate-500 mt-1">
+                  تاریخ ثبت‌نام، پلن فعلی و بازه اعتبار اشتراک هر کاربر. برای
+                  افزودن لایسنس یا مدیریت هر کاربر، از دکمه «مدیریت» همان ردیف
+                  استفاده کنید.
+                </p>
               </div>
 
               <div className="overflow-x-auto">
@@ -1583,6 +1574,7 @@ const filteredUsers = usersList.filter((u) => {
                       <th>شروع اعتبار</th>
                       <th>پایان اعتبار</th>
                       <th>روز باقیمانده</th>
+                      <th>عملیات</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1628,6 +1620,26 @@ const filteredUsers = usersList.filter((u) => {
                           {row.status === "active" && row.remainingDays > 0
                             ? `${row.remainingDays} روز`
                             : "-"}
+                        </td>
+                        <td>
+                          <button
+                            onClick={() => {
+                              const u = usersList.find((x) => x.username === row.username);
+                              if (!u) return;
+                              setEditingUser(u);
+                              setEditFullName(u.fullName);
+                              setEditEmail(u.email);
+                              setEditPhone(u.phone);
+                              setEditPassword("");
+                              setEditUserModalTab("license");
+                              setActivatePlanCode("1m");
+                              setSelectedQrUser(u);
+                              setUploadedQrBase64(u.qrImageUrl || "");
+                            }}
+                            className="py-1.5 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-bold"
+                          >
+                            مدیریت
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -2111,154 +2123,398 @@ const filteredUsers = usersList.filter((u) => {
         )}
       </main>
 
-      {/* 4. USER DETAILS EDIT DIALOG MODAL */}
+      {/* 4. USER MANAGEMENT MODAL (ویرایش مشخصات / لایسنس و خریدها / کیوآرکد) */}
       {editingUser && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-3xl p-6 text-right space-y-4">
-            <h3 className="font-extrabold text-base text-white border-r-4 border-indigo-500 pr-2">
-              ویرایش مشخصات لایسنس: {editingUser.fullName}
-            </h3>
-
-            <form onSubmit={handleEditUserSubmit} className="space-y-4">
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-300">
-                  نام کامل تجاری :
-                </label>
-                <input
-                  type="text"
-                  value={editFullName}
-                  onChange={(e) => setEditFullName(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2.5 px-3 text-xs text-slate-200 outline-none"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-300">
-                  آدرس ایمیل کاربر :
-                </label>
-                <input
-                  type="email"
-                  value={editEmail}
-                  onChange={(e) => setEditEmail(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2.5 px-3 text-xs text-slate-200 outline-none font-mono text-left"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-300">
-                  تلفن همراه :
-                </label>
-                <input
-                  type="tel"
-                  maxLength={11}
-                  value={editPhone}
-                  onChange={(e) => setEditPhone(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2.5 px-3 text-xs text-slate-200 outline-none font-mono text-left"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-300">
-                  تغییر پسورد یا رمز عبور (خالی بگذارید تا بدون تغییر بماند) :
-                </label>
-                <input
-                  type="text"
-                  placeholder="پسورد جدید..."
-                  value={editPassword}
-                  onChange={(e) => setEditPassword(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2.5 px-3 text-xs text-slate-200 outline-none font-mono text-left"
-                />
-              </div>
-
-              <div className="flex gap-2 justify-end pt-2">
-                <button
-                  type="button"
-                  onClick={() => setEditingUser(null)}
-                  className="py-2.5 px-4 bg-slate-800 text-slate-400 text-xs font-bold rounded-xl hover:text-white transition"
-                >
-                  انصراف
-                </button>
-                <button
-                  type="submit"
-                  className="py-2.5 px-5 bg-indigo-600 text-white text-xs font-bold rounded-xl hover:brightness-110 transition"
-                >
-                  ذخیره مشخصات کاربری
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* 5. MANUAL PLAN ACTIVATION MODAL (افزودن پلن برای کاربر) */}
-      {showActivatePlanModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-6 text-right space-y-5">
-            <h3 className="font-extrabold text-base text-white border-r-4 border-indigo-500 pr-2">
-              افزودن پلن برای کاربر
-            </h3>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-300">
-                انتخاب کاربر :
-              </label>
-              <select
-                value={activatePlanUsername}
-                onChange={(e) => setActivatePlanUsername(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2.5 px-3 text-xs text-slate-200 outline-none"
+          <div className="w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-3xl p-6 text-right space-y-5 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="font-extrabold text-base text-white">
+                مدیریت کاربر: {editingUser.fullName}
+                <span className="text-slate-500 font-mono text-xs mr-2">
+                  ({editingUser.username})
+                </span>
+              </h3>
+              <button
+                onClick={() => setEditingUser(null)}
+                className="text-slate-500 hover:text-white text-lg leading-none"
               >
-                <option value="">— انتخاب کنید —</option>
-                {usersList.map((u) => (
-                  <option key={u.username} value={u.username}>
-                    {u.fullName} ({u.username})
-                  </option>
-                ))}
-              </select>
+                ✕
+              </button>
             </div>
 
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-300">
-                مدت پلن :
-              </label>
-              <div className="grid grid-cols-3 gap-2">
-                {MANUAL_PLAN_OPTIONS.map((opt) => (
+            {/* تب‌ها */}
+            <div className="flex gap-2 flex-wrap">
+              <button
+                onClick={() => setEditUserModalTab("profile")}
+                className={`py-2 px-4 rounded-lg text-xs font-bold transition ${
+                  editUserModalTab === "profile"
+                    ? "bg-indigo-600 text-white"
+                    : "bg-slate-950 text-slate-400 hover:text-white border border-slate-800"
+                }`}
+              >
+                ویرایش مشخصات
+              </button>
+              <button
+                onClick={() => setEditUserModalTab("license")}
+                className={`py-2 px-4 rounded-lg text-xs font-bold transition ${
+                  editUserModalTab === "license"
+                    ? "bg-indigo-600 text-white"
+                    : "bg-slate-950 text-slate-400 hover:text-white border border-slate-800"
+                }`}
+              >
+                لایسنس و خریدها
+              </button>
+              <button
+                onClick={() => setEditUserModalTab("qr")}
+                className={`py-2 px-4 rounded-lg text-xs font-bold transition ${
+                  editUserModalTab === "qr"
+                    ? "bg-indigo-600 text-white"
+                    : "bg-slate-950 text-slate-400 hover:text-white border border-slate-800"
+                }`}
+              >
+                کیوآرکد
+              </button>
+            </div>
+
+            {/* ─── تب ۱: ویرایش مشخصات ─────────────────────────────────── */}
+            {editUserModalTab === "profile" && (
+              <form onSubmit={handleEditUserSubmit} className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-300">
+                    نام کامل تجاری :
+                  </label>
+                  <input
+                    type="text"
+                    value={editFullName}
+                    onChange={(e) => setEditFullName(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2.5 px-3 text-xs text-slate-200 outline-none"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-300">
+                    آدرس ایمیل کاربر :
+                  </label>
+                  <input
+                    type="email"
+                    value={editEmail}
+                    onChange={(e) => setEditEmail(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2.5 px-3 text-xs text-slate-200 outline-none font-mono text-left"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-300">
+                    تلفن همراه :
+                  </label>
+                  <input
+                    type="tel"
+                    maxLength={11}
+                    value={editPhone}
+                    onChange={(e) => setEditPhone(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2.5 px-3 text-xs text-slate-200 outline-none font-mono text-left"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-300">
+                    تغییر پسورد یا رمز عبور (خالی بگذارید تا بدون تغییر بماند) :
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="پسورد جدید..."
+                    value={editPassword}
+                    onChange={(e) => setEditPassword(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2.5 px-3 text-xs text-slate-200 outline-none font-mono text-left"
+                  />
+                </div>
+
+                <div className="flex gap-2 justify-end pt-2">
                   <button
-                    key={opt.code}
                     type="button"
-                    onClick={() => setActivatePlanCode(opt.code)}
-                    className={`py-2.5 rounded-xl text-xs font-bold transition-all border ${
-                      activatePlanCode === opt.code
-                        ? "bg-indigo-600 border-indigo-600 text-white"
-                        : "bg-slate-950 border-slate-800 text-slate-400 hover:text-white"
-                    }`}
+                    onClick={() => setEditingUser(null)}
+                    className="py-2.5 px-4 bg-slate-800 text-slate-400 text-xs font-bold rounded-xl hover:text-white transition"
                   >
-                    {opt.label}
+                    انصراف
                   </button>
-                ))}
-              </div>
-              <p className="text-[10px] text-slate-500 mt-1">
-                این پلن بلافاصله و بدون نیاز به رسید، برای کاربر انتخابی فعال
-                می‌شود.
-              </p>
-            </div>
+                  <button
+                    type="submit"
+                    className="py-2.5 px-5 bg-indigo-600 text-white text-xs font-bold rounded-xl hover:brightness-110 transition"
+                  >
+                    ذخیره مشخصات کاربری
+                  </button>
+                </div>
+              </form>
+            )}
 
-            <div className="flex gap-2 justify-end pt-2">
-              <button
-                type="button"
-                onClick={() => setShowActivatePlanModal(false)}
-                className="py-2.5 px-4 bg-slate-800 text-slate-400 text-xs font-bold rounded-xl hover:text-white transition"
-              >
-                انصراف
-              </button>
-              <button
-                type="button"
-                disabled={activatePlanLoading || !activatePlanUsername}
-                onClick={handleActivatePlan}
-                className="py-2.5 px-5 bg-indigo-600 text-white text-xs font-bold rounded-xl hover:brightness-110 transition disabled:opacity-50"
-              >
-                {activatePlanLoading ? "در حال فعال‌سازی..." : "فعال‌سازی پلن"}
-              </button>
-            </div>
+            {/* ─── تب ۲: لایسنس و خریدها (اختصاصی همین کاربر) ─────────────── */}
+            {editUserModalTab === "license" &&
+              (() => {
+                const overview = subscriptionsOverview.find(
+                  (o) => o.username === editingUser.username,
+                );
+                const userPurchases = subscriptionPurchases.filter(
+                  (p) => p.username === editingUser.username,
+                );
+                const firstPurchase = [...userPurchases].sort(
+                  (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+                )[0];
+
+                return (
+                  <div className="space-y-5">
+                    {/* خلاصه وضعیت */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                      <div className="p-3 rounded-xl bg-slate-950 border border-slate-800">
+                        <span className="text-slate-500 block mb-1">تاریخ ثبت‌نام</span>
+                        <span className="text-white font-bold block">
+                          {overview?.registered_at
+                            ? new Date(overview.registered_at).toLocaleString("fa-IR")
+                            : "نامشخص"}
+                        </span>
+                      </div>
+                      <div className="p-3 rounded-xl bg-slate-950 border border-slate-800">
+                        <span className="text-slate-500 block mb-1">اولین خرید</span>
+                        <span className="text-white font-bold block">
+                          {firstPurchase
+                            ? new Date(firstPurchase.created_at).toLocaleString("fa-IR")
+                            : "خریدی ثبت نشده"}
+                        </span>
+                      </div>
+                      <div className="p-3 rounded-xl bg-slate-950 border border-slate-800">
+                        <span className="text-slate-500 block mb-1">پلن فعلی</span>
+                        <span className="text-white font-bold block">
+                          {MANUAL_PLAN_OPTIONS.find((p) => p.code === overview?.plan)?.label ||
+                            overview?.plan ||
+                            "رایگان"}
+                        </span>
+                      </div>
+                      <div className="p-3 rounded-xl bg-slate-950 border border-slate-800">
+                        <span className="text-slate-500 block mb-1">روز باقیمانده</span>
+                        <span className="text-white font-bold block">
+                          {overview?.status === "active" && overview?.remainingDays > 0
+                            ? `${overview.remainingDays} روز`
+                            : "غیرفعال"}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* افزودن لایسنس مستقیم برای همین کاربر */}
+                    <div className="p-4 rounded-xl bg-indigo-600/10 border border-indigo-600/20 space-y-3">
+                      <span className="text-xs font-bold text-indigo-300 flex items-center gap-1.5">
+                        <Plus className="w-3.5 h-3.5" />
+                        افزودن لایسنس جدید برای این کاربر :
+                      </span>
+                      <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                        {MANUAL_PLAN_OPTIONS.map((opt) => (
+                          <button
+                            key={opt.code}
+                            type="button"
+                            onClick={() => setActivatePlanCode(opt.code)}
+                            className={`py-2 rounded-lg text-[11px] font-bold border transition ${
+                              activatePlanCode === opt.code
+                                ? "bg-indigo-600 border-indigo-600 text-white"
+                                : "bg-slate-950 border-slate-800 text-slate-400 hover:text-white"
+                            }`}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                      <button
+                        type="button"
+                        disabled={activatePlanLoading}
+                        onClick={handleActivatePlan}
+                        className="w-full py-2.5 rounded-lg bg-indigo-600 text-white text-xs font-bold disabled:opacity-50"
+                      >
+                        {activatePlanLoading ? "در حال فعال‌سازی..." : "افزودن این لایسنس"}
+                      </button>
+                      <p className="text-[10px] text-slate-500">
+                        اگر کاربر هم‌اکنون اعتبار باقیمانده داشته باشد، این پلن
+                        به انتهای اعتبار فعلی او اضافه (جمع) می‌شود.
+                      </p>
+                    </div>
+
+                    {/* تاریخچه کامل خرید/فعال‌سازی این کاربر */}
+                    <div className="space-y-2">
+                      <span className="text-xs font-bold text-slate-400 block">
+                        تاریخچه خرید و فعال‌سازی لایسنس :
+                      </span>
+                      {userPurchases.length === 0 ? (
+                        <p className="text-[11px] text-slate-500">
+                          تاکنون خرید یا فعال‌سازی‌ای برای این کاربر ثبت نشده است.
+                        </p>
+                      ) : (
+                        <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                          {userPurchases
+                            .slice()
+                            .sort(
+                              (a, b) =>
+                                new Date(b.created_at).getTime() -
+                                new Date(a.created_at).getTime(),
+                            )
+                            .map((p) => (
+                              <div
+                                key={p.id}
+                                className="p-3 rounded-lg bg-slate-950 border border-slate-800 text-[11px] flex flex-col gap-1"
+                              >
+                                <div className="flex justify-between items-center">
+                                  <span className="font-bold text-white">
+                                    {MANUAL_PLAN_OPTIONS.find((o) => o.code === p.plan)?.label ||
+                                      p.plan}
+                                  </span>
+                                  <span
+                                    className={
+                                      p.payment_status === "approved"
+                                        ? "text-emerald-400"
+                                        : p.payment_status === "pending"
+                                        ? "text-amber-400"
+                                        : "text-red-400"
+                                    }
+                                  >
+                                    {p.payment_status === "approved"
+                                      ? "فعال شده"
+                                      : p.payment_status === "pending"
+                                      ? "در انتظار"
+                                      : "رد شده"}
+                                  </span>
+                                </div>
+                                <span className="text-slate-500">
+                                  زمان ثبت درخواست: {new Date(p.created_at).toLocaleString("fa-IR")}
+                                </span>
+                                {p.start_date && p.expire_date && (
+                                  <span className="text-slate-500">
+                                    بازه فعال‌سازی: از {new Date(p.start_date).toLocaleString("fa-IR")}{" "}
+                                    تا {new Date(p.expire_date).toLocaleString("fa-IR")}
+                                  </span>
+                                )}
+                                <span className="text-slate-500">
+                                  روش:{" "}
+                                  {p.payment_method === "manual"
+                                    ? `فعال‌سازی مستقیم توسط ${p.approved_by || "ادمین"}`
+                                    : "کارت به کارت"}
+                                </span>
+                                {p.payment_status === "pending" && (
+                                  <button
+                                    onClick={() => approvePurchase(p.id)}
+                                    className="mt-1 self-start py-1 px-3 rounded bg-green-600 hover:bg-green-700 text-white text-[10px] font-bold"
+                                  >
+                                    تایید این خرید
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex justify-end pt-1">
+                      <button
+                        onClick={() => setEditingUser(null)}
+                        className="py-2.5 px-4 bg-slate-800 text-slate-400 text-xs font-bold rounded-xl hover:text-white transition"
+                      >
+                        بستن
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+
+            {/* ─── تب ۳: کیوآرکد (اختصاصی همین کاربر) ─────────────────────── */}
+            {editUserModalTab === "qr" && (
+              <div className="space-y-5">
+                <div className="border-b border-slate-800 pb-3">
+                  <h4 className="font-extrabold text-sm text-yellow-300">
+                    طراحی و مدیریت بارکد کارت: {editingUser.fullName}
+                  </h4>
+                  <span className="text-xs text-slate-400 mt-1 block">
+                    لینک کارت کاربر:{" "}
+                    <a
+                      href={`/card/${editingUser.username}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-blue-400 underline"
+                    >{`${window.location.host}/card/${editingUser.username}`}</a>
+                  </span>
+                  <span className="text-[10px] text-slate-500 mt-1 block">
+                    وضعیت فعلی:{" "}
+                    {editingUser.qrRequestStatus === "approved"
+                      ? "تایید شده و فعال در پنل کاربر"
+                      : editingUser.qrRequestStatus === "pending"
+                      ? "درخواست در انتظار بررسی"
+                      : "هنوز درخواستی ثبت نشده"}
+                  </span>
+                </div>
+
+                {uploadedQrBase64 ? (
+                  <div className="text-center p-4 bg-white rounded-xl inline-block mx-auto max-w-[200px]">
+                    <img
+                      src={uploadedQrBase64}
+                      className="w-32 h-32 object-contain mx-auto"
+                    />
+                    <span className="text-[8px] text-slate-500 mt-1 block">
+                      پیش نمایش بارکد آپلود شده
+                    </span>
+                  </div>
+                ) : (
+                  <div className="w-full text-center p-6 border border-dashed border-slate-800 rounded-xl text-slate-500 text-xs text-wrap">
+                    تصویری بارگذاری نشده است. می‌توانید به صورت خودکار بارکد
+                    استاندارد تولید کنید یا خود فایل باکیفیت را قرار دهید.
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <button
+                    onClick={generateAutoQrForUser}
+                    disabled={simulatingUpload}
+                    className="py-2 px-4 bg-slate-800 hover:bg-slate-750 text-white text-xs font-bold rounded-lg transition disabled:opacity-50"
+                  >
+                    تولید اتوماتیک کیوآرکد (پیشنهادی)
+                  </button>
+                  <div className="relative">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      id="editUserQrFile"
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files[0]) {
+                          handleUploadApprovedQr(e.target.files[0]);
+                        }
+                      }}
+                      className="hidden"
+                    />
+                    <label
+                      htmlFor="editUserQrFile"
+                      className="w-full py-2 px-4 rounded-lg bg-indigo-600/10 hover:bg-indigo-600/20 border border-indigo-600/25 text-indigo-400 text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer"
+                    >
+                      <UploadCloud className="w-4 h-4" />
+                      انتخاب فایل از دایرکتوری
+                    </label>
+                  </div>
+                </div>
+
+                <button
+                  onClick={async () => {
+                    await handleApproveQrRequest();
+                    // چون handleApproveQrRequest در پایان selectedQrUser رو null می‌کنه،
+                    // دوباره روی همین کاربر تنظیمش می‌کنیم تا تب باز بماند.
+                    setSelectedQrUser(editingUser);
+                  }}
+                  disabled={!uploadedQrBase64}
+                  className="w-full py-3 bg-indigo-600 border border-indigo-500 text-white font-bold text-xs rounded-xl hover:brightness-110 active:scale-98 transition disabled:opacity-50"
+                >
+                  تایید نهایی و ارسال به پنل کاربر
+                </button>
+
+                <div className="flex justify-end pt-1">
+                  <button
+                    onClick={() => setEditingUser(null)}
+                    className="py-2.5 px-4 bg-slate-800 text-slate-400 text-xs font-bold rounded-xl hover:text-white transition"
+                  >
+                    بستن
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

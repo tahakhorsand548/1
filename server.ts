@@ -203,6 +203,26 @@ function addPlanDuration(base: Date, planCode: string): Date {
   return d;
 }
 
+// اگر کاربر هم‌اکنون اشتراک فعال و منقضی‌نشده‌ای دارد، پلن جدید باید به انتهای
+// همان بازه اضافه شود (جمع‌شونده)، نه اینکه از امروز محاسبه و جایگزین شود.
+// مثال: کاربری با ۷ روز باقیمانده، پلن ۳ ماهه می‌خرد → باید ۳ ماه + ۷ روز شود.
+function getStackedBaseDate(username: string): Date {
+  const current = db
+    .prepare(`SELECT expire_date, status FROM subscriptions WHERE username=?`)
+    .get(username) as any;
+
+  const now = new Date();
+
+  if (current && current.status === "active" && current.expire_date) {
+    const currentExpire = new Date(current.expire_date);
+    if (currentExpire.getTime() > now.getTime()) {
+      return currentExpire;
+    }
+  }
+
+  return now;
+}
+
 // ─── رمزگذاری ─────────────────────────────────────────────────────────────────
 const HASH_ITERATIONS = 15000;
 const HASH_KEY_LEN    = 64;
@@ -851,11 +871,9 @@ app.post("/api/admin/subscription-purchases/:id/approve", verifyAdmin, (req, res
 
   const now = new Date();
 
-  const expire = new Date();
+  const base = getStackedBaseDate(purchase.username);
 
-  expire.setMonth(
-    expire.getMonth() + purchase.duration_months
-  );
+  const expire = addPlanDuration(base, purchase.plan);
 
   db.prepare(`
     UPDATE subscription_purchases
@@ -946,7 +964,8 @@ app.post("/api/admin/users/:username/activate-plan", verifyAdmin, (req: any, res
   }
 
   const now = new Date();
-  const expire = addPlanDuration(now, plan);
+  const base = getStackedBaseDate(username);
+  const expire = addPlanDuration(base, plan);
 
   // ۱. بروزرسانی وضعیت فعلی اشتراک کاربر
   db.prepare(`

@@ -224,11 +224,12 @@ function ProEditorGate({ targetUser }: { targetUser: User }) {
 
   if (loading) return <LoadingScreen text="در حال بررسی وضعیت اشتراک شما..." />;
 
-  // ۲. اشتراک فعال ندارد → برگشت به تب طراحی + باز شدن خودکار پاپ‌آپ خرید اشتراک
+  // ۲. اشتراک فعال ندارد → برگشت به داشبورد + باز شدن خودکار پاپ‌آپ خرید اشتراک
+  //    (مودال اشتراک اکنون در سطح کل داشبورد است، نه فقط تب طراحی)
   if (!isPro) {
     return (
       <Navigate
-        to={`/dashboard/${targetUser.username}/design`}
+        to={`/dashboard/${targetUser.username}`}
         replace
         state={{ openSubscriptionModal: true }}
       />

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { useTicketSocket } from "../hooks/useTicketSocket";
 import {
   User as UserIcon,
@@ -42,6 +42,7 @@ import {
   AdvertisingBanner,
 } from "../types";
 import IPhoneMockup from "./IPhoneMockup";
+import SubscriptionModal from "./SubscriptionModal";
 import { apiFetch } from "../utils/api";
 import { useSubscription } from "../hooks/useSubscription";
 import StatsTab from "./dashboard-tabs/StatsTab";
@@ -88,6 +89,7 @@ export default function UserDashboard({
   initialTab,
 }: UserDashboardProps) {
   const navigate = useNavigate();
+  const location = useLocation();
   const validTabs: DashboardTab[] = ["stats", "design", "qrcode", "tickets"];
   const [activeTab, setActiveTab] = useState<DashboardTab>(
     initialTab && validTabs.includes(initialTab) ? initialTab : "stats"
@@ -106,6 +108,21 @@ export default function UserDashboard({
     isPro,
     refetch: refetchSubscription,
   } = useSubscription();
+
+  // ─── مودال خرید/تمدید اشتراک — سراسری در سطح داشبورد ─────────────────────
+  // این مودال مستقل از تب فعال است، پس با کلیک روی «خرید»/«تمدید» در هر تبی
+  // (آمار، طراحی و ...) بلافاصله و در همان صفحه باز می‌شود، بدون جابجایی تب.
+  const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
+
+  // اگر از مسیر «/editor-pro/:username» بدون اشتراک فعال به داشبورد هدایت
+  // شده باشیم، این پاپ‌آپ باید به‌صورت خودکار باز شود.
+  useEffect(() => {
+    if ((location.state as any)?.openSubscriptionModal) {
+      setShowSubscriptionModal(true);
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state]);
 
   // Card customization stats
   const [cardData, setCardData] = useState<CardData | null>(null);
@@ -777,6 +794,7 @@ export default function UserDashboard({
             subscription={subscription}
             subscriptionLoading={subscriptionLoading}
             isPro={isPro}
+            onOpenSubscriptionModal={() => setShowSubscriptionModal(true)}
           />
         )}
 
@@ -801,7 +819,7 @@ export default function UserDashboard({
             editSocial={editSocial}
             isPro={isPro}
             subscriptionLoading={subscriptionLoading}
-            refetchSubscription={refetchSubscription}
+            onOpenSubscriptionModal={() => setShowSubscriptionModal(true)}
           />
         )}
 
@@ -940,6 +958,14 @@ export default function UserDashboard({
           </div>
         </div>
       )}
+
+      {/* 4. مودال سراسری خرید/تمدید اشتراک — مستقل از تب فعال */}
+      <SubscriptionModal
+        isOpen={showSubscriptionModal}
+        onClose={() => setShowSubscriptionModal(false)}
+        user={user}
+        onPurchased={refetchSubscription}
+      />
     </div>
   );
 }

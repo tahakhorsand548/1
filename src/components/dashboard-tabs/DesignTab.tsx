@@ -1,5 +1,5 @@
 import React from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import {
   Palette,
   Plus,
@@ -69,8 +69,8 @@ interface DesignTabProps {
   isPro: boolean;
   /** در حال بررسی وضعیت اشتراک از سرور */
   subscriptionLoading: boolean;
-  /** برای بروزرسانی وضعیت اشتراک پس از ثبت رسید/تأیید ادمین */
-  refetchSubscription: () => Promise<void>;
+  /** باز کردن مودال سراسری خرید/تمدید اشتراک (در سطح UserDashboard مدیریت می‌شود) */
+  onOpenSubscriptionModal: () => void;
 }
 
 export default function DesignTab({
@@ -92,51 +92,22 @@ export default function DesignTab({
   editSocial,
   isPro,
   subscriptionLoading,
-  refetchSubscription,
+  onOpenSubscriptionModal,
 }: DesignTabProps) {
   const navigate = useNavigate();
-  const location = useLocation();
-  const [showSubscriptionModal, setShowSubscriptionModal] = React.useState(false);
-const [selectedPlan, setSelectedPlan] = React.useState<
-  "free" | "3months" | "6months" | "12months" | null
->(null);
-const [showPaymentMethods, setShowPaymentMethods] = React.useState(false);
-const [paymentMethod, setPaymentMethod] = React.useState<"zarinpal" | "card" | null>(null);
-const [showCardPayment, setShowCardPayment] = React.useState(false);
-  const [receiptImage, setReceiptImage] = React.useState<File | null>(null);
-
-  // اگر کاربر از مسیر «/editor-pro/:username» بدون اشتراک فعال به این تب
-  // هدایت شده باشد، پاپ‌آپ خرید اشتراک باید به‌صورت خودکار باز شود.
-  React.useEffect(() => {
-    if ((location.state as any)?.openSubscriptionModal) {
-      setShowSubscriptionModal(true);
-      // state رو پاک می‌کنیم تا با هر رفرش/تعویض تب دوباره باز نشه
-      navigate(location.pathname, { replace: true, state: {} });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.state]);
 
   // کلیک روی دکمه «پلن حرفه‌ای»:
   //   - اگر کاربر اشتراک فعال دارد → مستقیم وارد مینی‌اپ ادیتور پرو می‌شود
-  //   - اگر ندارد → پاپ‌آپ خرید اشتراک باز می‌شود (روال فعلی)
+  //   - اگر ندارد → پاپ‌آپ سراسری خرید اشتراک باز می‌شود (در همین صفحه)
   const handleProButtonClick = () => {
     if (subscriptionLoading) return;
     if (isPro) {
       navigate(`/editor-pro/${user.username}`);
     } else {
-      setShowSubscriptionModal(true);
+      onOpenSubscriptionModal();
     }
   };
 
-  // 👇 این قسمت را اضافه کن
-  const selectedAmount =
-    selectedPlan === "3months"
-      ? 890000
-      : selectedPlan === "6months"
-      ? 1590000
-      : selectedPlan === "12months"
-      ? 2790000
-      : 0;
   return (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 items-start text-right">
           {/* Input fields panel (right side in Arabic view) */}
@@ -1412,281 +1383,6 @@ const [showCardPayment, setShowCardPayment] = React.useState(false);
           <div className="xl:sticky xl:top-6 bg-slate-100 p-6 rounded-[40px] border border-slate-200/80 flex items-center justify-center shadow-inner">
             <IPhoneMockup data={cardData} username={user.username} />
           </div>
-                  {showSubscriptionModal && (
-          <div className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4">
-            <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl p-6 relative">
-
-              <button
-                onClick={() => setShowSubscriptionModal(false)}
-                className="absolute top-3 left-3 text-gray-500 hover:text-red-500 text-xl"
-              >
-                ✕
-              </button>
-
-              <h2 className="text-xl font-bold text-center mb-2">
-                اشتراک حرفه‌ای
-              </h2>
-
-              <p className="text-sm text-gray-500 text-center mb-6">
-                یکی از پلن‌های زیر را انتخاب کنید.
-              </p>
-
-              <div className="space-y-3">
-
-                <button
-                  onClick={() => setSelectedPlan("free")}
-                  className={`w-full rounded-xl border p-3 transition ${
-                    selectedPlan === "free"
-                      ? "border-blue-600 bg-blue-50"
-                      : "hover:border-blue-500"
-                  }`}
-                >
-                رایگان
-                </button> 
-
-                  <button
-                    onClick={() => setSelectedPlan("3months")}
-                    className={`w-full rounded-xl border p-3 transition ${
-                      selectedPlan === "3months"
-                        ? "border-blue-600 bg-blue-50"
-                        : "hover:border-blue-500"
-                    }`}
-                  >
-                سه ماهه
-                  </button>
-
-              <button
-                onClick={() => setSelectedPlan("6months")}
-                className={`w-full rounded-xl border p-3 transition ${
-                  selectedPlan === "6months"
-                    ? "border-blue-600 bg-blue-50"
-                    : "hover:border-blue-500"
-                }`}
-              >
-                شش ماهه
-                </button>
-
-              <button
-                onClick={() => setSelectedPlan("1year")}
-                className={`w-full rounded-xl border p-3 transition ${
-                  selectedPlan === "1year"
-                    ? "border-blue-600 bg-blue-50"
-                    : "hover:border-blue-500"
-                }`}
-              >
-              یک ساله
-              </button>
-
-              <button
-                onClick={() => setShowPaymentMethods(true)}
-                className="w-full mt-5 rounded-xl bg-blue-600 text-white p-3 font-bold disabled:opacity-50"
-              >
-                ادامه و پرداخت
-              </button>
-
-              </div>
-            </div>
-          </div>
-        )}
-
-    
-                    {/* انتخاب روزش پرداخت کارت به کارت یا درگاه پرداخت*/}
-
-
-                    {showPaymentMethods && (
-            <div className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4">
-
-              <div className="w-full max-w-md bg-white rounded-2xl p-6">
-
-                <h2 className="text-xl font-bold text-center mb-5">
-                  انتخاب روش پرداخت
-                </h2>
-
-                <button
-                  onClick={() => setPaymentMethod("zarinpal")}
-                  className="w-full border rounded-xl p-4 mb-3"
-                >
-                  پرداخت آنلاین (زرین پال)
-                </button>
-
-                <button
-                  onClick={() => setPaymentMethod("card")}
-                  className="w-full border rounded-xl p-4 mb-5"
-                >
-                  کارت به کارت
-                </button>
-                                <button
-                  disabled={!paymentMethod}
-                  onClick={() => {
-
-                    if (paymentMethod === "card") {
-
-                      setShowPaymentMethods(false);
-                      setShowCardPayment(true);
-
-                    }
-
-                    if (paymentMethod === "zarinpal") {
-
-                      console.log("زرین پال");
-
-                    }
-
-                  }}
-                  className="w-full bg-blue-600 text-white rounded-xl p-3 mb-3 disabled:opacity-50"
-                >
-                  ادامه
-                </button>
-
-                <button
-                  onClick={() => setShowPaymentMethods(false)}
-                  className="w-full bg-gray-200 rounded-xl p-3"
-                >
-                  انصراف
-                </button>
-
-              </div>
-
-            </div>
-          )}
-             
-
-
-
-                {/* تکمیل پرداخت با کارت بانکی */}
-
-                                {showCardPayment && (
-                  <div className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4">
-
-                    <div className="w-full max-w-lg bg-white rounded-2xl p-6">
-
-                      <h2 className="text-2xl font-bold text-center mb-2">
-                        پرداخت کارت به کارت
-                      </h2>
-
-                      <p className="text-gray-500 text-center mb-6">
-                        مبلغ را به کارت زیر واریز کرده و سپس رسید را ارسال کنید.
-                      </p>
-
-                      {/* مبلغ */}
-                      <div className="rounded-xl border p-4 mb-4">
-
-                        <div className="text-sm text-gray-500">
-                          مبلغ قابل پرداخت
-                        </div>
-
-                        <div className="text-2xl font-bold text-blue-600 mt-2">
-
-                          {selectedPlan === "3months" && "890,000 تومان"}
-
-                          {selectedPlan === "6months" && "1,590,000 تومان"}
-
-                          {selectedPlan === "1year" && "2,790,000 تومان"}
-
-                        </div>
-
-                      </div>
-
-                      {/* شماره کارت */}
-
-                      <div className="rounded-xl border p-4 mb-3">
-
-                        <div className="text-sm text-gray-500 mb-2">
-                          شماره کارت
-                        </div>
-
-                        <div className="font-bold text-lg">
-                          6037-9918-1234-5678
-                        </div>
-
-                      </div>
-
-                      {/* صاحب حساب */}
-
-                      <div className="rounded-xl border p-4 mb-5">
-
-                        <div className="text-sm text-gray-500">
-                          صاحب حساب
-                        </div>
-
-                        <div className="font-bold">
-                          طاها خورسند
-                        </div>
-
-                      </div>
-
-                      <div className="mt-5">
-
-                        <label className="block text-sm font-medium mb-2">
-                          رسید پرداخت
-                        </label>
-
-                        <input
-                          type="file"
-                          accept="image/*"
-                          onChange={(e) =>
-                            setReceiptImage(e.target.files?.[0] || null)
-                          }
-                          className="w-full rounded-lg border p-2"
-                        />
-
-                      </div>
-
-                      <button
-                      onClick={async () => {
-
-                            const formData = new FormData();
-
-                            formData.append("plan", selectedPlan!);
-                            formData.append("amount", String(selectedAmount));
-
-                            if (receiptImage) {
-                              formData.append("receipt", receiptImage);
-                            }
-
-
-                            console.log("receiptImage:", receiptImage);
-                            console.log("selectedPlan:", selectedPlan);
-                            console.log("selectedAmount:", selectedAmount);
-
-                            const res = await fetch("/api/payment/card-to-card", {
-                              method: "POST",
-                              credentials: "include",
-                              body: formData,
-                            });
-
-                            const data = await res.json();
-
-                            console.log(data);
-
-                            if (!data.success) {
-                              alert(data.error || "خطا");
-                              return;
-                            }
-
-                            alert("درخواست شما ثبت شد و پس از بررسی فعال خواهد شد.");
-
-                            setShowPaymentMethods(false);
-                            setShowSubscriptionModal(false);
-                            refetchSubscription();
-
-                          }}
-                        className="w-full bg-green-600 text-white rounded-xl p-3 mb-3"
-                      >
-                        ثبت رسید
-                      </button>
-
-                      <button
-                        onClick={() => setShowCardPayment(false)}
-                        className="w-full bg-gray-200 rounded-xl p-3"
-                      >
-                        بازگشت
-                      </button>
-
-                    </div>
-
-                  </div>
-                )}
 
 
         </div>

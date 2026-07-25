@@ -1,5 +1,4 @@
 import React from "react";
-import { useNavigate } from "react-router-dom";
 import { Copy, ExternalLink, Crown, RefreshCw } from "lucide-react";
 import { CardData, User, AdvertisingBanner } from "../../types";
 import { SubscriptionInfo } from "../../hooks/useSubscription";
@@ -14,6 +13,8 @@ interface StatsTabProps {
   subscription: SubscriptionInfo | null;
   subscriptionLoading: boolean;
   isPro: boolean;
+  /** باز کردن مودال سراسری خرید/تمدید اشتراک (مستقل از تب فعال) */
+  onOpenSubscriptionModal: () => void;
 }
 
 export default function StatsTab({
@@ -26,17 +27,8 @@ export default function StatsTab({
   subscription,
   subscriptionLoading,
   isPro,
+  onOpenSubscriptionModal,
 }: StatsTabProps) {
-  const navigate = useNavigate();
-
-  // خرید/تمدید اشتراک: کاربر به تب طراحی هدایت می‌شود و پاپ‌آپ خرید اشتراک
-  // به‌صورت خودکار باز می‌شود (همان مکانیزم استفاده‌شده در محافظ مسیر ادیتور پرو)
-  const goToSubscriptionModal = () => {
-    navigate(`/dashboard/${user.username}/design`, {
-      state: { openSubscriptionModal: true },
-    });
-  };
-
   return (
         <div className="space-y-8 text-right">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -65,7 +57,7 @@ export default function StatsTab({
                     </span>
                   </div>
                   <button
-                    onClick={goToSubscriptionModal}
+                    onClick={onOpenSubscriptionModal}
                     className="py-1.5 px-3.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-[11px] font-bold transition-all"
                   >
                     تمدید اشتراک
@@ -73,7 +65,7 @@ export default function StatsTab({
                 </div>
               ) : (
                 <button
-                  onClick={goToSubscriptionModal}
+                  onClick={onOpenSubscriptionModal}
                   className="flex items-center gap-1.5 py-2.5 px-4 rounded-xl bg-gradient-to-r from-amber-400 to-orange-500 text-white text-xs font-bold hover:scale-[1.02] transition-all"
                 >
                   <Crown className="w-4 h-4" />
