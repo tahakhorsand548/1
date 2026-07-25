@@ -155,6 +155,54 @@ CREATE TABLE IF NOT EXISTS subscription_features (
 );
 `);
 
+// ─── مهاجرت داده (Migration): افزودن بازه اعتبار به تاریخچه خرید/فعال‌سازی ────
+// این دو ستون امکان نمایش «از چه تاریخی تا چه تاریخی فعال بوده» را برای هر
+// رکورد از تاریخچه (چه کارت‌به‌کارت، چه فعال‌سازی مستقیم ادمین) فراهم می‌کنند.
+try { db.exec(`ALTER TABLE subscription_purchases ADD COLUMN start_date TEXT NOT NULL DEFAULT ''`); } catch {}
+try { db.exec(`ALTER TABLE subscription_purchases ADD COLUMN expire_date TEXT NOT NULL DEFAULT ''`); } catch {}
+
+// ─── نگاشت پلن‌های قابل فعال‌سازی دستی توسط ادمین ────────────────────────────
+// کدهای «۷ روزه / ۱ ماهه / ۳ ماهه / ۶ ماهه / ۱ ساله» که ادمین می‌تواند مستقیماً
+// و بدون نیاز به رسید کارت‌به‌کارت، برای هر کاربری فعال کند.
+const MANUAL_PLAN_LABELS: Record<string, string> = {
+  "7d": "۷ روزه",
+  "1m": "۱ ماهه",
+  "3m": "۳ ماهه",
+  "6m": "۶ ماهه",
+  "1y": "۱ ساله",
+};
+
+// محاسبه تاریخ پایان اعتبار بر اساس کد پلن (هم کدهای ادمین، هم کدهای درگاه/کارت‌به‌کارت)
+function addPlanDuration(base: Date, planCode: string): Date {
+  const d = new Date(base);
+  switch (planCode) {
+    case "7d":
+      d.setDate(d.getDate() + 7);
+      break;
+    case "1m":
+    case "1month":
+    case "1months":
+      d.setMonth(d.getMonth() + 1);
+      break;
+    case "3m":
+    case "3months":
+      d.setMonth(d.getMonth() + 3);
+      break;
+    case "6m":
+    case "6months":
+      d.setMonth(d.getMonth() + 6);
+      break;
+    case "1y":
+    case "12months":
+    case "1year":
+      d.setMonth(d.getMonth() + 12);
+      break;
+    default:
+      d.setMonth(d.getMonth() + 1);
+  }
+  return d;
+}
+
 // ─── رمزگذاری ─────────────────────────────────────────────────────────────────
 const HASH_ITERATIONS = 15000;
 const HASH_KEY_LEN    = 64;
@@ -228,9 +276,11 @@ VALUES (?,?,?,?,?,?,?)
 `);
 
 insertPlan.run("free", "رایگان", 0, 0, 1, 1, 1);
-insertPlan.run("3m", "سه ماهه", 3, 0, 0, 1, 2);
-insertPlan.run("6m", "شش ماهه", 6, 0, 0, 1, 3);
-insertPlan.run("1y", "یک ساله", 12, 0, 0, 1, 4);
+insertPlan.run("7d", "۷ روزه", 0, 0, 0, 1, 2);
+insertPlan.run("1m", "یک ماهه", 1, 0, 0, 1, 3);
+insertPlan.run("3m", "سه ماهه", 3, 0, 0, 1, 4);
+insertPlan.run("6m", "شش ماهه", 6, 0, 0, 1, 5);
+insertPlan.run("1y", "یک ساله", 12, 0, 0, 1, 6);
 
 const insertFeature = db.prepare(`
 INSERT OR IGNORE INTO subscription_features
@@ -812,10 +862,14 @@ app.post("/api/admin/subscription-purchases/:id/approve", verifyAdmin, (req, res
     SET
       payment_status='approved',
       approved_at=?,
-      approved_by='admin'
+      approved_by='admin',
+      start_date=?,
+      expire_date=?
     WHERE id=?
   `).run(
     now.toISOString(),
+    now.toISOString(),
+    expire.toISOString(),
     purchaseId
   );
 
@@ -869,6 +923,116 @@ app.post("/api/admin/subscription-purchases/:id/approve", verifyAdmin, (req, res
     success:true
   });
 
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// API: فعال‌سازی مستقیم پلن توسط ادمین (بدون نیاز به رسید کارت‌به‌کارت)
+// پلن‌های مجاز: ۷ روزه، ۱ ماهه، ۳ ماهه، ۶ ماهه، ۱ ساله
+// ──────────────────────────────────────────────────────────────────────────
+app.post("/api/admin/users/:username/activate-plan", verifyAdmin, (req: any, res) => {
+  const username = req.params.username;
+  const { plan } = req.body;
+
+  if (!MANUAL_PLAN_LABELS[plan]) {
+    return res.status(400).json({
+      success: false,
+      message: "پلن انتخاب‌شده معتبر نیست.",
+    });
+  }
+
+  const user = db.prepare("SELECT username FROM users WHERE LOWER(username)=LOWER(?)").get(username);
+  if (!user) {
+    return res.status(404).json({ success: false, message: "کاربر یافت نشد." });
+  }
+
+  const now = new Date();
+  const expire = addPlanDuration(now, plan);
+
+  // ۱. بروزرسانی وضعیت فعلی اشتراک کاربر
+  db.prepare(`
+    INSERT INTO subscriptions(
+      id, username, plan, status, start_date, expire_date, created_at, updated_at
+    )
+    VALUES(?,?,?,?,?,?,?,?)
+    ON CONFLICT(username)
+    DO UPDATE SET
+      plan=excluded.plan,
+      status='active',
+      start_date=excluded.start_date,
+      expire_date=excluded.expire_date,
+      updated_at=excluded.updated_at
+  `).run(
+    crypto.randomUUID(),
+    username,
+    plan,
+    "active",
+    now.toISOString(),
+    expire.toISOString(),
+    now.toISOString(),
+    now.toISOString(),
+  );
+
+  // ۲. ثبت این فعال‌سازی در تاریخچه (تا در گزارش فعال‌سازی‌ها نمایش داده شود)
+  db.prepare(`
+    INSERT INTO subscription_purchases (
+      id, username, plan, duration_months, amount, payment_method,
+      payment_status, transaction_id, receipt_image, description,
+      created_at, approved_at, approved_by, start_date, expire_date
+    )
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  `).run(
+    crypto.randomUUID(),
+    username,
+    plan,
+    0,
+    0,
+    "manual",
+    "approved",
+    "",
+    "",
+    `فعال‌سازی مستقیم پلن ${MANUAL_PLAN_LABELS[plan]} توسط ادمین`,
+    now.toISOString(),
+    now.toISOString(),
+    "admin",
+    now.toISOString(),
+    expire.toISOString(),
+  );
+
+  return res.json({ success: true });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// API: گزارش کامل وضعیت اشتراک همه کاربران (تاریخ ثبت‌نام، پلن، بازه اعتبار)
+// ──────────────────────────────────────────────────────────────────────────
+app.get("/api/admin/subscriptions-overview", verifyAdmin, (req, res) => {
+  const rows = db.prepare(`
+    SELECT
+      u.username,
+      u.full_name,
+      u.email,
+      u.phone,
+      s.plan,
+      s.status,
+      s.start_date,
+      s.expire_date,
+      s.created_at AS registered_at
+    FROM users u
+    LEFT JOIN subscriptions s ON s.username = u.username
+    WHERE u.username != 'admin'
+    ORDER BY s.created_at DESC
+  `).all() as any[];
+
+  const now = Date.now();
+  const data = rows.map((r) => {
+    let remainingDays = 0;
+    if (r.expire_date) {
+      const diff = new Date(r.expire_date).getTime() - now;
+      remainingDays = Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
+    }
+    return { ...r, remainingDays };
+  });
+
+  return res.json(data);
 });
 
 app.post("/api/admin/users/:username/edit", verifyAdmin, (req, res) => {

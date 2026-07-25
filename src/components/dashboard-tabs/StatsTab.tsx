@@ -1,6 +1,8 @@
 import React from "react";
-import { Copy, ExternalLink } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Copy, ExternalLink, Crown, RefreshCw } from "lucide-react";
 import { CardData, User, AdvertisingBanner } from "../../types";
+import { SubscriptionInfo } from "../../hooks/useSubscription";
 
 interface StatsTabProps {
   user: User;
@@ -9,6 +11,9 @@ interface StatsTabProps {
   chartData: { label: string; value: number }[];
   maxChartVal: number;
   handleCopyLink: (link: string) => void;
+  subscription: SubscriptionInfo | null;
+  subscriptionLoading: boolean;
+  isPro: boolean;
 }
 
 export default function StatsTab({
@@ -18,16 +23,64 @@ export default function StatsTab({
   chartData,
   maxChartVal,
   handleCopyLink,
+  subscription,
+  subscriptionLoading,
+  isPro,
 }: StatsTabProps) {
+  const navigate = useNavigate();
+
+  // خرید/تمدید اشتراک: کاربر به تب طراحی هدایت می‌شود و پاپ‌آپ خرید اشتراک
+  // به‌صورت خودکار باز می‌شود (همان مکانیزم استفاده‌شده در محافظ مسیر ادیتور پرو)
+  const goToSubscriptionModal = () => {
+    navigate(`/dashboard/${user.username}/design`, {
+      state: { openSubscriptionModal: true },
+    });
+  };
+
   return (
         <div className="space-y-8 text-right">
-          <div>
-            <h2 className="text-2xl font-black text-slate-900">
-              سلام "{user.fullName}" گرامی
-            </h2>
-            <p className="text-xs text-slate-500 font-semibold mt-1.5">
-              به صفحه کنترل پنل و ایجاد کارت ویزیت دیجیتال یوکارت خوش آمدید.
-            </p>
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div>
+              <h2 className="text-2xl font-black text-slate-900">
+                سلام "{user.fullName}" گرامی
+              </h2>
+              <p className="text-xs text-slate-500 font-semibold mt-1.5">
+                به صفحه کنترل پنل و ایجاد کارت ویزیت دیجیتال یوکارت خوش آمدید.
+              </p>
+            </div>
+
+            {/* نشان وضعیت اشتراک پرو */}
+            <div>
+              {subscriptionLoading ? (
+                <div className="flex items-center gap-2 py-2.5 px-4 rounded-xl bg-slate-100 text-slate-400 text-xs font-bold">
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  در حال بررسی اشتراک...
+                </div>
+              ) : isPro ? (
+                <div className="flex items-center gap-3 py-2.5 px-4 rounded-2xl bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200">
+                  <div className="flex items-center gap-1.5 text-amber-600 text-xs font-black">
+                    <Crown className="w-4 h-4" />
+                    <span>
+                      {subscription?.remainingDays ?? 0} روز باقیمانده از اشتراک
+                    </span>
+                  </div>
+                  <button
+                    onClick={goToSubscriptionModal}
+                    className="py-1.5 px-3.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-[11px] font-bold transition-all"
+                  >
+                    تمدید اشتراک
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={goToSubscriptionModal}
+                  className="flex items-center gap-1.5 py-2.5 px-4 rounded-xl bg-gradient-to-r from-amber-400 to-orange-500 text-white text-xs font-bold hover:scale-[1.02] transition-all"
+                >
+                  <Crown className="w-4 h-4" />
+                  خرید اشتراک پرو
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Quick Online link trigger */}

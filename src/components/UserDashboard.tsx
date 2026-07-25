@@ -774,6 +774,9 @@ export default function UserDashboard({
             chartData={chartData}
             maxChartVal={maxChartVal}
             handleCopyLink={handleCopyLink}
+            subscription={subscription}
+            subscriptionLoading={subscriptionLoading}
+            isPro={isPro}
           />
         )}
 

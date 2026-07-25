@@ -34,7 +34,7 @@ import { Trash2 } from "lucide-react";
 
 // const fetch = apiFetch;
 
-type AdminTab = "desk" | "users" | "qr" | "tickets" | "announcements" | "banners";
+type AdminTab = "desk" | "users" | "qr" | "tickets" | "subscriptions" | "announcements" | "banners";
 
 interface AdminPanelProps {
   onBypassLogin: (username: string) => void;
@@ -50,7 +50,7 @@ export default function AdminPanel({
   initialTab,
 }: AdminPanelProps) {
   const navigate = useNavigate();
-  const validTabs: AdminTab[] = ["desk", "users", "qr", "tickets", "announcements", "banners"];
+  const validTabs: AdminTab[] = ["desk", "users", "qr", "tickets", "subscriptions", "announcements", "banners"];
   const [activeTab, setActiveTab] = useState<AdminTab>(
     initialTab && validTabs.includes(initialTab) ? initialTab : "desk"
   );
@@ -121,6 +121,25 @@ const filteredUsers = usersList.filter((u) => {
   // تایید خرید کاربران
 
   const [subscriptionPurchases, setSubscriptionPurchases] = React.useState<any[]>([]);
+
+  // گزارش کامل وضعیت اشتراک همه‌ی کاربران (تاریخ ثبت‌نام / پلن فعلی / بازه اعتبار)
+  const [subscriptionsOverview, setSubscriptionsOverview] = React.useState<any[]>([]);
+
+  // مودال «افزودن پلن» — فعال‌سازی مستقیم اشتراک برای یک کاربر توسط ادمین
+  const [showActivatePlanModal, setShowActivatePlanModal] = React.useState(false);
+  const [activatePlanUsername, setActivatePlanUsername] = React.useState("");
+  const [activatePlanCode, setActivatePlanCode] = React.useState<
+    "7d" | "1m" | "3m" | "6m" | "1y"
+  >("1m");
+  const [activatePlanLoading, setActivatePlanLoading] = React.useState(false);
+
+  const MANUAL_PLAN_OPTIONS: { code: "7d" | "1m" | "3m" | "6m" | "1y"; label: string }[] = [
+    { code: "7d", label: "۷ روزه" },
+    { code: "1m", label: "۱ ماهه" },
+    { code: "3m", label: "۳ ماهه" },
+    { code: "6m", label: "۶ ماهه" },
+    { code: "1y", label: "۱ ساله" },
+  ];
 
 
   // ─── WebSocket: real-time تیکت‌ها (بعد از همه useState ها) ─────────────────
@@ -285,6 +304,13 @@ const filteredUsers = usersList.filter((u) => {
       if (purchasesRes.ok) {
         const purchases = await purchasesRes.json();
         setSubscriptionPurchases(purchases);
+      }
+
+      // 8. گزارش کامل وضعیت اشتراک همه کاربران
+      const overviewRes = await apiFetch("/api/admin/subscriptions-overview");
+      if (overviewRes.ok) {
+        const overview = await overviewRes.json();
+        setSubscriptionsOverview(overview);
       }
     } catch (e) {
       console.error(e);
@@ -670,6 +696,39 @@ const filteredUsers = usersList.filter((u) => {
 
         fetchAdminData();
 
+      };
+
+      // فعال‌سازی مستقیم پلن برای یک کاربر (بدون نیاز به رسید کارت‌به‌کارت)
+      const handleActivatePlan = async () => {
+        if (!activatePlanUsername) {
+          alert("لطفا یک کاربر را انتخاب کنید.");
+          return;
+        }
+        setActivatePlanLoading(true);
+        try {
+          const res = await apiFetch(
+            `/api/admin/users/${activatePlanUsername}/activate-plan`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ plan: activatePlanCode }),
+            },
+          );
+          const data = await res.json();
+          if (res.ok && data.success) {
+            alert("پلن با موفقیت برای کاربر فعال شد.");
+            setShowActivatePlanModal(false);
+            setActivatePlanUsername("");
+            fetchAdminData();
+          } else {
+            alert(data.message || "خطا در فعال‌سازی پلن.");
+          }
+        } catch (e) {
+          console.error(e);
+          alert("خطای اتصال به سرور.");
+        } finally {
+          setActivatePlanLoading(false);
+        }
       };
 
 
@@ -1486,138 +1545,246 @@ const filteredUsers = usersList.filter((u) => {
 
           {activeTab === "subscriptions" && (
 
-          <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6">
+          <div className="space-y-8">
 
-            <h2 className="text-xl font-bold text-white mb-6">
-              درخواست‌های اشتراک
-            </h2>
+            {/* ── گزارش وضعیت اشتراک کاربران (ثبت‌نام / پلن فعلی / بازه اعتبار) ── */}
+            <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-6">
+                <div>
+                  <h2 className="text-xl font-bold text-white">
+                    وضعیت اشتراک کاربران
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-1">
+                    تاریخ ثبت‌نام، پلن فعلی و بازه اعتبار اشتراک هر کاربر
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setActivatePlanUsername("");
+                    setActivatePlanCode("1m");
+                    setShowActivatePlanModal(true);
+                  }}
+                  className="flex items-center gap-1.5 py-2.5 px-5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all"
+                >
+                  <Plus className="w-4 h-4" />
+                  افزودن پلن برای کاربر
+                </button>
+              </div>
 
-            <div className="overflow-x-auto">
-
-              <table className="w-full text-sm">
-
-                <thead>
-
-                  <tr className="border-b border-slate-700 text-slate-400">
-
-                    <th className="py-3">کاربر</th>
-
-                    <th>نام</th>
-
-                    <th>پلن</th>
-
-                    <th>مبلغ</th>
-
-                    <th>وضعیت</th>
-
-                    <th>تاریخ</th>
-
-                    <th>رسید</th>
-
-                    <th>عملیات</th>
-
-                  </tr>
-
-                </thead>
-
-                <tbody>
-
-                  {subscriptionPurchases.map((purchase) => (
-
-                    <tr
-                      key={purchase.id}
-                      className="border-b border-slate-800 text-center hover:bg-slate-800/40 transition"
-                    >
-
-                      <td className="py-4">
-                        {purchase.username}
-                      </td>
-
-                      <td>
-                        {purchase.full_name}
-                      </td>
-
-                      <td>
-                        {purchase.plan}
-                      </td>
-
-                      <td>
-                        {purchase.amount.toLocaleString()} تومان
-                      </td>
-
-                      <td>
-
-                        {purchase.payment_status === "pending" && (
-                      <span className="bg-yellow-500/20 text-yellow-400 px-3 py-1 rounded-full text-xs">
-                        در انتظار
-                      </span>
-                    )}
-
-                    {purchase.payment_status === "approved" && (
-                      <span className="bg-green-500/20 text-green-400 px-3 py-1 rounded-full text-xs">
-                        تایید شده
-                      </span>
-                    )}
-
-                    {purchase.payment_status === "rejected" && (
-                      <span className="bg-red-500/20 text-red-400 px-3 py-1 rounded-full text-xs">
-                        رد شده
-                      </span>
-)}
-
-                      </td>
-
-                      <td>
-
-                        {new Date(purchase.created_at).toLocaleDateString("fa-IR")}
-
-                      </td>
-
-                      <td>
-                      {purchase.receipt_image ? (
-                        <a
-                          href={purchase.receipt_image}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-xs"
-                        >
-                          مشاهده رسید
-                        </a>
-                      ) : (
-                        "-"
-                      )}
-                    </td>
-
-                      <td>
-
-                        {purchase.payment_status === "pending" && (
-                        <button
-                          onClick={() => approvePurchase(purchase.id)}
-                          className="rounded-lg bg-green-600 px-3 py-2 text-white text-xs hover:bg-green-700"
-                        >
-                          تایید
-                        </button>
-                      )}
-
-                        <button
-                        onClick={() => deletePurchase(purchase.id)}
-                        className="p-2 rounded-lg bg-red-600 hover:bg-red-700 text-white"
-                        title="حذف درخواست"
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-700 text-slate-400">
+                      <th className="py-3">کاربر</th>
+                      <th>نام</th>
+                      <th>تاریخ ثبت‌نام</th>
+                      <th>پلن فعلی</th>
+                      <th>وضعیت</th>
+                      <th>شروع اعتبار</th>
+                      <th>پایان اعتبار</th>
+                      <th>روز باقیمانده</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {subscriptionsOverview.map((row) => (
+                      <tr
+                        key={row.username}
+                        className="border-b border-slate-800 text-center hover:bg-slate-800/40 transition"
                       >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                      </td>
+                        <td className="py-4 font-mono">{row.username}</td>
+                        <td>{row.full_name}</td>
+                        <td className="text-xs text-slate-400">
+                          {row.registered_at
+                            ? new Date(row.registered_at).toLocaleString("fa-IR")
+                            : "نامشخص"}
+                        </td>
+                        <td>
+                          {MANUAL_PLAN_OPTIONS.find((p) => p.code === row.plan)?.label ||
+                            row.plan ||
+                            "رایگان"}
+                        </td>
+                        <td>
+                          {row.status === "active" && row.remainingDays > 0 ? (
+                            <span className="bg-green-500/20 text-green-400 px-3 py-1 rounded-full text-xs">
+                              فعال
+                            </span>
+                          ) : (
+                            <span className="bg-slate-700/50 text-slate-400 px-3 py-1 rounded-full text-xs">
+                              غیرفعال
+                            </span>
+                          )}
+                        </td>
+                        <td className="text-xs text-slate-400">
+                          {row.start_date
+                            ? new Date(row.start_date).toLocaleString("fa-IR")
+                            : "-"}
+                        </td>
+                        <td className="text-xs text-slate-400">
+                          {row.expire_date
+                            ? new Date(row.expire_date).toLocaleString("fa-IR")
+                            : "-"}
+                        </td>
+                        <td className="font-bold">
+                          {row.status === "active" && row.remainingDays > 0
+                            ? `${row.remainingDays} روز`
+                            : "-"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* ── تاریخچه کامل درخواست‌ها/فعال‌سازی‌ها (کارت‌به‌کارت + دستی) ── */}
+            <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6">
+
+              <h2 className="text-xl font-bold text-white mb-6">
+                گزارش خرید و فعال‌سازی پلن‌ها
+              </h2>
+
+              <div className="overflow-x-auto">
+
+                <table className="w-full text-sm">
+
+                  <thead>
+
+                    <tr className="border-b border-slate-700 text-slate-400">
+
+                      <th className="py-3">کاربر</th>
+
+                      <th>نام</th>
+
+                      <th>پلن</th>
+
+                      <th>مبلغ</th>
+
+                      <th>روش</th>
+
+                      <th>وضعیت</th>
+
+                      <th>تاریخ ثبت درخواست</th>
+
+                      <th>بازه اعتبار (فعال شده تا)</th>
+
+                      <th>رسید</th>
+
+                      <th>عملیات</th>
 
                     </tr>
 
-                  ))}
+                  </thead>
 
-                </tbody>
+                  <tbody>
 
-              </table>
+                    {subscriptionPurchases.map((purchase) => (
+
+                      <tr
+                        key={purchase.id}
+                        className="border-b border-slate-800 text-center hover:bg-slate-800/40 transition"
+                      >
+
+                        <td className="py-4">
+                          {purchase.username}
+                        </td>
+
+                        <td>
+                          {purchase.full_name}
+                        </td>
+
+                        <td>
+                          {MANUAL_PLAN_OPTIONS.find((p) => p.code === purchase.plan)?.label ||
+                            purchase.plan}
+                        </td>
+
+                        <td>
+                          {purchase.amount ? `${purchase.amount.toLocaleString()} تومان` : "—"}
+                        </td>
+
+                        <td className="text-xs text-slate-400">
+                          {purchase.payment_method === "manual" ? "فعال‌سازی ادمین" : "کارت به کارت"}
+                        </td>
+
+                        <td>
+
+                          {purchase.payment_status === "pending" && (
+                        <span className="bg-yellow-500/20 text-yellow-400 px-3 py-1 rounded-full text-xs">
+                          در انتظار
+                        </span>
+                      )}
+
+                      {purchase.payment_status === "approved" && (
+                        <span className="bg-green-500/20 text-green-400 px-3 py-1 rounded-full text-xs">
+                          تایید شده
+                        </span>
+                      )}
+
+                      {purchase.payment_status === "rejected" && (
+                        <span className="bg-red-500/20 text-red-400 px-3 py-1 rounded-full text-xs">
+                          رد شده
+                        </span>
+                      )}
+
+                        </td>
+
+                        <td className="text-xs text-slate-400 whitespace-nowrap">
+
+                          {new Date(purchase.created_at).toLocaleString("fa-IR")}
+
+                        </td>
+
+                        <td className="text-xs text-slate-400 whitespace-nowrap">
+                          {purchase.start_date && purchase.expire_date
+                            ? `${new Date(purchase.start_date).toLocaleString("fa-IR")} تا ${new Date(purchase.expire_date).toLocaleString("fa-IR")}`
+                            : "—"}
+                        </td>
+
+                        <td>
+                        {purchase.receipt_image ? (
+                          <a
+                            href={purchase.receipt_image}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-xs"
+                          >
+                            مشاهده رسید
+                          </a>
+                        ) : (
+                          "-"
+                        )}
+                      </td>
+
+                        <td>
+
+                          {purchase.payment_status === "pending" && (
+                          <button
+                            onClick={() => approvePurchase(purchase.id)}
+                            className="rounded-lg bg-green-600 px-3 py-2 text-white text-xs hover:bg-green-700"
+                          >
+                            تایید
+                          </button>
+                        )}
+
+                          <button
+                          onClick={() => deletePurchase(purchase.id)}
+                          className="p-2 rounded-lg bg-red-600 hover:bg-red-700 text-white"
+                          title="حذف درخواست"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                        </td>
+
+                      </tr>
+
+                    ))}
+
+                  </tbody>
+
+                </table>
+
+              </div>
 
             </div>
-
           </div>
 
         )}
@@ -2019,6 +2186,79 @@ const filteredUsers = usersList.filter((u) => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* 5. MANUAL PLAN ACTIVATION MODAL (افزودن پلن برای کاربر) */}
+      {showActivatePlanModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-6 text-right space-y-5">
+            <h3 className="font-extrabold text-base text-white border-r-4 border-indigo-500 pr-2">
+              افزودن پلن برای کاربر
+            </h3>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-300">
+                انتخاب کاربر :
+              </label>
+              <select
+                value={activatePlanUsername}
+                onChange={(e) => setActivatePlanUsername(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-850 rounded-xl py-2.5 px-3 text-xs text-slate-200 outline-none"
+              >
+                <option value="">— انتخاب کنید —</option>
+                {usersList.map((u) => (
+                  <option key={u.username} value={u.username}>
+                    {u.fullName} ({u.username})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-300">
+                مدت پلن :
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                {MANUAL_PLAN_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.code}
+                    type="button"
+                    onClick={() => setActivatePlanCode(opt.code)}
+                    className={`py-2.5 rounded-xl text-xs font-bold transition-all border ${
+                      activatePlanCode === opt.code
+                        ? "bg-indigo-600 border-indigo-600 text-white"
+                        : "bg-slate-950 border-slate-800 text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-slate-500 mt-1">
+                این پلن بلافاصله و بدون نیاز به رسید، برای کاربر انتخابی فعال
+                می‌شود.
+              </p>
+            </div>
+
+            <div className="flex gap-2 justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => setShowActivatePlanModal(false)}
+                className="py-2.5 px-4 bg-slate-800 text-slate-400 text-xs font-bold rounded-xl hover:text-white transition"
+              >
+                انصراف
+              </button>
+              <button
+                type="button"
+                disabled={activatePlanLoading || !activatePlanUsername}
+                onClick={handleActivatePlan}
+                className="py-2.5 px-5 bg-indigo-600 text-white text-xs font-bold rounded-xl hover:brightness-110 transition disabled:opacity-50"
+              >
+                {activatePlanLoading ? "در حال فعال‌سازی..." : "فعال‌سازی پلن"}
+              </button>
+            </div>
           </div>
         </div>
       )}
