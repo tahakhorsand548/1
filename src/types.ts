@@ -32,7 +32,7 @@ export interface WorkingDays {
 }
 
 export interface CardDesign {
-  template: 'classic' | 'modern' | 'minimalist';
+  template: 'classic' | 'modern' | 'minimalist' | 'glass';
   colorTheme: string;
   isDark: boolean;
 }

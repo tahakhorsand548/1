@@ -96,6 +96,11 @@ export default function DesignTab({
 }: DesignTabProps) {
   const navigate = useNavigate();
 
+  // نوع کارت انتخابی: فروشگاهی (فعال) / شخصی (به‌زودی) / پرو (اشتراک ویژه)
+  const [selectedCardType, setSelectedCardType] = React.useState<
+    "store" | "personal" | "pro"
+  >("store");
+
   // کلیک روی دکمه «پلن حرفه‌ای»:
   //   - اگر کاربر اشتراک فعال دارد → مستقیم وارد مینی‌اپ ادیتور پرو می‌شود
   //   - اگر ندارد → پاپ‌آپ سراسری خرید اشتراک باز می‌شود (در همین صفحه)
@@ -138,6 +143,70 @@ export default function DesignTab({
               </div>
             )}
 
+            {/* نوع کارت ویزیت: فروشگاهی / شخصی / پرو */}
+            <div className="rounded-2xl bg-white border border-slate-200/80 shadow-sm p-5 space-y-3">
+              <span className="text-xs font-extrabold text-slate-800 flex items-center gap-2">
+                <Palette className="w-4 h-4 text-blue-500" />
+                نوع کارت ویزیت
+              </span>
+
+              <div className="grid grid-cols-3 gap-3">
+                {/* فروشگاهی */}
+                <button
+                  type="button"
+                  onClick={() => setSelectedCardType("store")}
+                  className={`p-3 rounded-xl border text-center font-bold text-xs transition ${
+                    selectedCardType === "store"
+                      ? "bg-blue-600 border-blue-600 text-white"
+                      : "bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100"
+                  }`}
+                >
+                  فروشگاهی
+                </button>
+
+                {/* شخصی — غیرفعال، به‌زودی */}
+                <button
+                  type="button"
+                  disabled
+                  title="ویرایشگر کارت شخصی به‌زودی اضافه می‌شود"
+                  className="relative p-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-400 text-center font-bold text-xs cursor-not-allowed opacity-70"
+                >
+                  شخصی
+                  <span className="absolute -top-2 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[9px] px-2 py-0.5 rounded-full font-bold">
+                    به‌زودی
+                  </span>
+                </button>
+
+                {/* پرو */}
+                <div className="relative">
+                  {!isPro && (
+                    <span className="absolute -top-2 left-1/2 -translate-x-1/2 bg-red-600 text-white text-[9px] px-2 py-0.5 rounded-full font-bold z-10">
+                      نیازمند اشتراک
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleProButtonClick}
+                    disabled={subscriptionLoading}
+                    className="w-full p-3 rounded-xl border border-amber-300 bg-gradient-to-r from-amber-400 to-orange-500 text-white text-center font-bold text-xs hover:scale-[1.02] transition-all disabled:opacity-60 flex items-center justify-center gap-1.5"
+                  >
+                    <Crown className="w-3.5 h-3.5" />
+                    {subscriptionLoading
+                      ? "در حال بررسی..."
+                      : isPro
+                      ? "ورود به ادیتور پرو"
+                      : "پلن حرفه‌ای"}
+                  </button>
+                </div>
+              </div>
+
+              {selectedCardType === "personal" && (
+                <p className="text-[11px] text-slate-400 font-semibold pt-1">
+                  ویرایشگر اختصاصی کارت شخصی به‌زودی اضافه می‌شود.
+                </p>
+              )}
+            </div>
+
             {/* Template Theme and visual identity card options */}
             <div className="rounded-2xl bg-white border border-slate-200/80 shadow-sm overflow-hidden">
               <button
@@ -161,9 +230,8 @@ export default function DesignTab({
               </button>
               {openDesignSection === "design" && (
                 <div className="p-5 border-t border-slate-100 space-y-4">
-                  {/* 3 Templates choices */}
-                  {/* Template Choices */}
-                  <div className="grid grid-cols-3 gap-3">
+                  {/* 2 Style choices for the store card: مدرن / شیشه‌ای */}
+                  <div className="grid grid-cols-2 gap-3">
 
                     {/* Modern */}
                     <button
@@ -177,7 +245,7 @@ export default function DesignTab({
                         })
                       }
                       className={`p-3 rounded-xl border text-center font-bold text-xs transition ${
-                        cardData.design?.template === "modern"
+                        !cardData.design?.template || cardData.design?.template === "modern"
                           ? "bg-blue-600 border-blue-600 text-white"
                           : "bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100"
                       }`}
@@ -185,47 +253,25 @@ export default function DesignTab({
                       مدرن
                     </button>
 
-                    {/* Classic */}
+                    {/* Glass (شیشه‌ای / لیکویید گلس) */}
                     <button
                       onClick={() =>
                         setCardData({
                           ...cardData,
                           design: {
                             ...cardData.design,
-                            template: "classic",
+                            template: "glass",
                           },
                         })
                       }
                       className={`p-3 rounded-xl border text-center font-bold text-xs transition ${
-                        cardData.design?.template === "classic"
+                        cardData.design?.template === "glass"
                           ? "bg-blue-600 border-blue-600 text-white"
                           : "bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100"
                       }`}
                     >
-                      کلاسیک
+                      شیشه‌ای
                     </button>
-
-                    {/* Premium */}
-                    <div className="relative">
-                      {!isPro && (
-                        <span className="absolute -top-2 left-1/2 -translate-x-1/2 bg-red-600 text-white text-[9px] px-2 py-0.5 rounded-full font-bold z-10">
-                          نیازمند اشتراک
-                        </span>
-                      )}
-
-                        <button
-                          onClick={handleProButtonClick}
-                          disabled={subscriptionLoading}
-                          className="w-full p-3 rounded-xl border border-amber-300 bg-gradient-to-r from-amber-400 to-orange-500 text-white text-center font-bold text-xs hover:scale-[1.02] transition-all disabled:opacity-60 flex items-center justify-center gap-1.5"
-                        >
-                          <Crown className="w-3.5 h-3.5" />
-                          {subscriptionLoading
-                            ? "در حال بررسی..."
-                            : isPro
-                            ? "ورود به ادیتور پرو"
-                            : "پلن حرفه‌ای"}
-                        </button>
-                    </div>
 
                   </div>
 

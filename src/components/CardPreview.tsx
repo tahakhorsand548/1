@@ -135,14 +135,55 @@ export default function CardPreview({ data, username, isPreview = false }: CardP
 
   const dayStatus = getDayStatus();
 
+  // آیا این قالب حالت «شیشه‌ای» (لیکویید گلس) است؟
+  // ساختار و محتوا دقیقاً همان قالب مدرن است؛ فقط رنگ پنل‌ها شیشه‌ای می‌شود
+  // و در هر دو حالت روشن/تیره کار می‌کند.
+  const isGlass = template === "glass";
+
+  const outerBgClass = isGlass
+    ? mode(
+        "bg-gradient-to-br from-slate-100 via-white to-slate-200 text-gray-800",
+        "bg-gradient-to-br from-slate-950 via-slate-900 to-black text-gray-200",
+      )
+    : mode("bg-[#fafaff] text-gray-800", "bg-[#0f172a] text-gray-200");
+
+  // پنل اصلی بخش‌ها (اطلاعات تماس، شعب، شبکه‌های اجتماعی، محصولات، گالری، ساعات کاری)
+  const panelClass = isGlass
+    ? mode(
+        "bg-white/35 border-white/50 backdrop-blur-2xl backdrop-saturate-150 shadow-[0_8px_32px_rgba(31,38,135,0.15)]",
+        "bg-white/10 border-white/10 backdrop-blur-2xl backdrop-saturate-150 shadow-[0_8px_32px_rgba(0,0,0,0.35)]",
+      )
+    : mode("bg-white border-purple-50/50", "bg-[#1e293b] border-gray-700/50");
+
+  // ردیف‌های داخلی (تلفن/موبایل) داخل کارت اطلاعات تماس
+  const innerRowClass = isGlass
+    ? mode("bg-white/25 backdrop-blur-md", "bg-white/5 backdrop-blur-md")
+    : mode("bg-gray-50", "bg-gray-800");
+
+  // کارت هر شعبه داخل بخش آدرس شعب
+  const branchCardClass = isGlass
+    ? mode(
+        "bg-white/25 border-white/40 backdrop-blur-md",
+        "bg-white/5 border-white/10 backdrop-blur-md",
+      )
+    : mode("bg-gray-50 border-gray-100", "bg-gray-800 border-gray-700");
+
+  // کارت هر محصول داخل بخش محصولات
+  const productCardClass = isGlass
+    ? mode(
+        "bg-white/30 border-white/40 backdrop-blur-md",
+        "bg-white/5 border-white/10 backdrop-blur-md",
+      )
+    : mode("bg-white border-gray-100", "bg-gray-800 border-gray-700");
+
   // ==========================================
-  // ONLY render this advanced UI for "modern" template
+  // ONLY render this advanced UI for "modern" and "glass" templates
   // ==========================================
-  if (template === "modern") {
+  if (template === "modern" || template === "glass") {
     return (
       <div className="card-preview-scope">
         <div
-          className={`max-w-md mx-auto min-h-screen relative overflow-hidden shadow-2xl transition-colors duration-300 font-sans template-modern ${mode("bg-[#fafaff] text-gray-800", "bg-[#0f172a] text-gray-200")}`}
+          className={`max-w-md mx-auto min-h-screen relative overflow-hidden shadow-2xl transition-colors duration-300 font-sans template-${template} ${outerBgClass}`}
           style={{ direction: "rtl" }}
         >
           <style dangerouslySetInnerHTML={{ __html: `
@@ -215,12 +256,12 @@ export default function CardPreview({ data, username, isPreview = false }: CardP
           <main className="px-4 py-4 space-y-6 relative z-10">
             
             {/* Contact Info Card */}
-            <section className={`rounded-[28px] p-5 shadow-soft border transition-colors ${mode("bg-white border-purple-50/50", "bg-[#1e293b] border-gray-700/50")}`}>
+            <section className={`rounded-[28px] p-5 shadow-soft border transition-colors ${panelClass}`}>
               <div className="flex flex-col space-y-2.5">
                 
                 {/* Landlines Grouped in ONE box */}
                 {landlines && landlines.filter(Boolean).length > 0 && (
-                  <div className={`flex justify-between items-center p-2.5 rounded-2xl transition-colors ${mode("bg-gray-50", "bg-gray-800")}`}>
+                  <div className={`flex justify-between items-center p-2.5 rounded-2xl transition-colors ${innerRowClass}`}>
                     <div className="flex items-center gap-2.5">
                       <div className="w-8 h-8 rounded-xl glass-icon flex items-center justify-center text-white shadow-sm" style={{ background: `linear-gradient(135deg, ${themeHex}cc 0%, ${themeHex}e6 100%)` }}>
                         <Phone className="w-[11px]" />
@@ -244,7 +285,7 @@ export default function CardPreview({ data, username, isPreview = false }: CardP
 
                 {/* Phones Grouped in ONE box */}
                 {phones && phones.filter(Boolean).length > 0 && (
-                  <div className={`flex justify-between items-center p-2.5 rounded-2xl transition-colors ${mode("bg-gray-50", "bg-gray-800")}`}>
+                  <div className={`flex justify-between items-center p-2.5 rounded-2xl transition-colors ${innerRowClass}`}>
                     <div className="flex items-center gap-2.5">
                       <div className="w-8 h-8 rounded-xl glass-icon flex items-center justify-center text-white shadow-sm" style={{ background: `linear-gradient(135deg, ${themeHex}cc 0%, ${themeHex}e6 100%)` }}>
                         <Phone className="w-[11px]" />
@@ -284,14 +325,14 @@ export default function CardPreview({ data, username, isPreview = false }: CardP
 
             {/* Branch Section */}
             {branches && branches.length > 0 && (
-              <section className={`rounded-[28px] p-5 shadow-soft border flex flex-col items-center transition-colors ${mode("bg-white border-purple-50/50", "bg-[#1e293b] border-gray-700/50")}`}>
+              <section className={`rounded-[28px] p-5 shadow-soft border flex flex-col items-center transition-colors ${panelClass}`}>
                 <div className="flex items-center gap-2 mb-4">
                   <MapPin className="w-4 h-4" style={{ color: themeHex }} />
                   <h2 className={`font-bold text-sm ${mode("text-gray-800", "text-white")}`}>آدرس شعب ما</h2>
                 </div>
                 <div className="flex gap-4 overflow-x-auto hide-scrollbar w-full snap-x pb-2">
                   {branches.map((b, idx) => (
-                    <div key={`branch-${idx}`} className={`carousel-item opacity-100 scale-100 snap-center shrink-0 w-[85%] rounded-2xl p-4 border flex flex-col items-center transition-colors ${mode("bg-gray-50 border-gray-100", "bg-gray-800 border-gray-700")}`}>
+                    <div key={`branch-${idx}`} className={`carousel-item opacity-100 scale-100 snap-center shrink-0 w-[85%] rounded-2xl p-4 border flex flex-col items-center transition-colors ${branchCardClass}`}>
                       <h3 className="font-bold text-sm mb-2" style={{ color: themeHex }}>{b.title || "شعبه اصلی"}</h3>
                       <p className={`text-[11px] mb-5 text-center leading-relaxed ${mode("text-gray-500", "text-gray-400")}`}>
                         {b.address || "آدرس ثبت نشده است"}
@@ -342,7 +383,7 @@ export default function CardPreview({ data, username, isPreview = false }: CardP
 
             {/* Social Media Section */}
             {socials && Object.keys(socials).length > 0 && (
-              <section className={`rounded-[28px] p-5 shadow-soft border flex flex-col items-center transition-colors ${mode("bg-white border-purple-50/50", "bg-[#1e293b] border-gray-700/50")}`}>
+              <section className={`rounded-[28px] p-5 shadow-soft border flex flex-col items-center transition-colors ${panelClass}`}>
                 <div className="flex items-center gap-2 mb-4">
                   <div className="w-2 h-2 rounded-full" style={{ backgroundColor: themeHex }}></div>
                   <h2 className={`font-bold text-sm ${mode("text-gray-800", "text-white")}`}>ما را در شبکه‌های اجتماعی دنبال کنید</h2>
@@ -415,7 +456,7 @@ export default function CardPreview({ data, username, isPreview = false }: CardP
 
             {/* Products Section - Infinite loop */}
               {infiniteProducts.length > 0 && (
-                <section className={`rounded-[28px] p-5 shadow-soft border flex flex-col items-center transition-colors ${mode("bg-white border-purple-50/50", "bg-[#1e293b] border-gray-700/50")}`}>
+                <section className={`rounded-[28px] p-5 shadow-soft border flex flex-col items-center transition-colors ${panelClass}`}>
                   <div className="flex items-center gap-2 mb-1">
                     <Store className="w-4 h-4" style={{ color: themeHex }} />
                     <h2 className={`font-bold text-sm ${mode("text-gray-800", "text-white")}`}>خدمات و محصولات ما</h2>
@@ -427,7 +468,7 @@ export default function CardPreview({ data, username, isPreview = false }: CardP
                       <button
                         key={`prod-${idx}`}
                         onClick={() => p.link && handleInteraction("product", p.link)}
-                        className={`carousel-item opacity-100 scale-100 rounded-2xl shadow-card p-2 flex flex-col items-center snap-center shrink-0 w-44 border transition-colors hover:scale-95 duration-300 text-right ${mode("bg-white border-gray-100", "bg-gray-800 border-gray-700")}`}
+                        className={`carousel-item opacity-100 scale-100 rounded-2xl shadow-card p-2 flex flex-col items-center snap-center shrink-0 w-44 border transition-colors hover:scale-95 duration-300 text-right ${productCardClass}`}
                       >
                         <div className={`w-full h-32 rounded-xl overflow-hidden mb-3 relative ${mode("bg-gray-50", "bg-gray-900")}`}>
                           {p.imageUrl ? (
@@ -453,7 +494,7 @@ export default function CardPreview({ data, username, isPreview = false }: CardP
 
             {/* Image Gallery Section - Infinite loop */}
             {infiniteGallery.length > 0 && (
-              <section className={`rounded-[28px] p-5 shadow-soft border flex flex-col items-center transition-colors ${mode("bg-white border-purple-50/50", "bg-[#1e293b] border-gray-700/50")}`}>
+              <section className={`rounded-[28px] p-5 shadow-soft border flex flex-col items-center transition-colors ${panelClass}`}>
                 <div className="flex items-center gap-2 mb-1">
                   <ImageIcon className="w-4 h-4" style={{ color: themeHex }} />
                   <h2 className={`font-bold text-sm ${mode("text-gray-800", "text-white")}`}>گالری تصاویر</h2>
@@ -478,7 +519,7 @@ export default function CardPreview({ data, username, isPreview = false }: CardP
                   <h2 className={`font-bold text-sm ${mode("text-gray-800", "text-white")}`}>ساعات کاری</h2>
                 </div>
 
-                <div className={`w-full rounded-[28px] p-5 shadow-soft border transition-colors ${mode("bg-white border-purple-50/50", "bg-[#1e293b] border-gray-700/50")}`}>
+                <div className={`w-full rounded-[28px] p-5 shadow-soft border transition-colors ${panelClass}`}>
                   <div className={`flex flex-col space-y-3 text-[13px] font-medium ${mode("text-gray-600", "text-gray-300")}`}>
                     {Object.entries(workingDays).map(([day, val]) => (
                       <div key={day} className={`flex justify-between items-center border-b pb-2 transition-colors last:border-0 last:pb-0 ${mode("border-gray-50", "border-gray-800")}`}>
