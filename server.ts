@@ -249,6 +249,31 @@ function getJalaliDate(date: Date): string {
   return new Intl.DateTimeFormat("fa-IR", { month: "short", day: "numeric" } as const).format(date);
 }
 
+// ─── کلیدهای تاریخ/ساعت به فرم ISO (برای ذخیره‌سازی قابل‌مرتب‌سازی و قابل‌محاسبه) ──
+function isoDateKey(date: Date): string {
+  return date.toISOString().slice(0, 10); // YYYY-MM-DD
+}
+function isoHourKey(date: Date): string {
+  return date.toISOString().slice(0, 13); // YYYY-MM-DDTHH
+}
+
+// یک واحد از تاریخچه روزانه/ساعتی را برای یک متریک مشخص، ۱ واحد افزایش می‌دهد
+// و طول تاریخچه را برای جلوگیری از رشد بی‌رویه دیتابیس محدود می‌کند.
+function bumpStatBucket(
+  map: Record<string, { visits: number; scans: number; linkOpens: number; buttonClicks: number }>,
+  key: string,
+  metric: "visits" | "scans" | "linkOpens" | "buttonClicks",
+  maxEntries: number,
+) {
+  if (!map[key]) map[key] = { visits: 0, scans: 0, linkOpens: 0, buttonClicks: 0 };
+  map[key][metric] = (map[key][metric] || 0) + 1;
+
+  const keys = Object.keys(map).sort();
+  if (keys.length > maxEntries) {
+    keys.slice(0, keys.length - maxEntries).forEach((k) => delete map[k]);
+  }
+}
+
 // ─── داده پیش‌فرض کارت ───────────────────────────────────────────────────────
 function createDefaultCardData(brandName: string) {
   return {
@@ -267,7 +292,7 @@ function createDefaultCardData(brandName: string) {
       "جمعه":    { isOpen: false, openTime: "00:00", closeTime: "00:00", isClosed: true  },
     },
     design: { template: "modern", colorTheme: "#3B82F6", isDark: false },
-    stats:  { totalVisits: 0, scans: 0, linkOpens: 0, buttonClicks: 0, dailyVisits: {} },
+    stats:  { totalVisits: 0, scans: 0, linkOpens: 0, buttonClicks: 0, dailyVisits: {}, dailyStats: {}, hourlyStats: {} },
   };
 }
 console.log(db.prepare("SELECT * FROM users WHERE username = 'admin'").get());
@@ -664,16 +689,26 @@ app.get("/api/card/:username", (req, res) => {
   if (user.isSuspended) return res.status(403).json({ message: "این کارت به دلیل تعلیق حساب غیرفعال است.", isSuspended: true });
 
   const cardData = user.cardData;
-  if (!cardData.stats) cardData.stats = { totalVisits: 0, scans: 0, linkOpens: 0, buttonClicks: 0, dailyVisits: {} };
+  if (!cardData.stats) cardData.stats = { totalVisits: 0, scans: 0, linkOpens: 0, buttonClicks: 0, dailyVisits: {}, dailyStats: {}, hourlyStats: {} };
+  if (!cardData.stats.dailyStats) cardData.stats.dailyStats = {};
+  if (!cardData.stats.hourlyStats) cardData.stats.hourlyStats = {};
 
   cardData.stats.totalVisits++;
   source === "scan" ? cardData.stats.scans++ : cardData.stats.linkOpens++;
 
   const today = getJalaliDate(new Date());
   cardData.stats.dailyVisits[today] = (cardData.stats.dailyVisits[today] || 0) + 1;
-  // نگه‌داری فقط ۳۰ روز اخیر
+  // نگه‌داری فقط ۳۰ روز اخیر (فرمت قدیمی، برای سازگاری با کد قبلی)
   const keys = Object.keys(cardData.stats.dailyVisits);
   if (keys.length > 30) keys.slice(0, keys.length - 30).forEach(k => delete cardData.stats.dailyVisits[k]);
+
+  // ─── تاریخچه جدید (روزانه تا ۶ ماه + ساعتی تا ۲۴ ساعت) برای نمودار چند-متریکی ──
+  const now = new Date();
+  bumpStatBucket(cardData.stats.dailyStats, isoDateKey(now), "visits", 200);
+  bumpStatBucket(cardData.stats.hourlyStats, isoHourKey(now), "visits", 48);
+  const sourceMetric = source === "scan" ? "scans" : "linkOpens";
+  bumpStatBucket(cardData.stats.dailyStats, isoDateKey(now), sourceMetric, 200);
+  bumpStatBucket(cardData.stats.hourlyStats, isoHourKey(now), sourceMetric, 48);
 
   db.prepare("UPDATE users SET card_data=? WHERE username=?").run(JSON.stringify(cardData), user.username);
   return res.json({ fullName: user.fullName, username: user.username, cardData });
@@ -683,7 +718,16 @@ app.post("/api/card/:username/click", (req, res) => {
   const user = getUser(req.params.username);
   if (!user) return res.status(404).json({ message: "کاربر یافت نشد." });
   const cd = user.cardData;
+  if (!cd.stats) cd.stats = { totalVisits: 0, scans: 0, linkOpens: 0, buttonClicks: 0, dailyVisits: {}, dailyStats: {}, hourlyStats: {} };
+  if (!cd.stats.dailyStats) cd.stats.dailyStats = {};
+  if (!cd.stats.hourlyStats) cd.stats.hourlyStats = {};
+
   cd.stats.buttonClicks = (cd.stats.buttonClicks || 0) + 1;
+
+  const now = new Date();
+  bumpStatBucket(cd.stats.dailyStats, isoDateKey(now), "buttonClicks", 200);
+  bumpStatBucket(cd.stats.hourlyStats, isoHourKey(now), "buttonClicks", 48);
+
   db.prepare("UPDATE users SET card_data=? WHERE username=?").run(JSON.stringify(cd), user.username);
   return res.json({ success: true });
 });

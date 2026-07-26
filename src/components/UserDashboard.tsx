@@ -585,31 +585,7 @@ export default function UserDashboard({
     );
   }
 
-  // JALALI Date calculation helper for dynamic chart
-  const getJalaliMonthsArray = () => {
-    // Return last 7 entries of cardData stats
-    const daily = cardData.stats?.dailyVisits || {};
-    const entries = Object.entries(daily);
-    if (entries.length === 0) {
-      return [
-        { label: "شنبه", value: 12 },
-        { label: "یکشنبه", value: 15 },
-        { label: "دوشنبه", value: 8 },
-        { label: "سه شنبه", value: 25 },
-        { label: "چهارشنبه", value: 19 },
-        { label: "پنجشنبه", value: 30 },
-        { label: "جمعه", value: 14 },
-      ];
-    }
-    // Take last 7
-    return entries.slice(-7).map(([date, val]) => ({
-      label: date,
-      value: val as number,
-    }));
-  };
 
-  const chartData = getJalaliMonthsArray();
-  const maxChartVal = Math.max(...chartData.map((d) => d.value), 10);
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col md:flex-row">
@@ -788,8 +764,6 @@ export default function UserDashboard({
             user={user}
             cardData={cardData}
             banners={banners}
-            chartData={chartData}
-            maxChartVal={maxChartVal}
             handleCopyLink={handleCopyLink}
             subscription={subscription}
             subscriptionLoading={subscriptionLoading}

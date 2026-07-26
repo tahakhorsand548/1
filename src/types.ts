@@ -37,12 +37,23 @@ export interface CardDesign {
   isDark: boolean;
 }
 
+export interface StatBucket {
+  visits: number;
+  scans: number;
+  linkOpens: number;
+  buttonClicks: number;
+}
+
 export interface CardStats {
   totalVisits: number;
   scans: number;
   linkOpens: number;
   buttonClicks: number;
   dailyVisits: { [date: string]: number };
+  /** تاریخچه روزانه هر ۴ متریک، کلید به شکل ISO یعنی YYYY-MM-DD (برای نمودار جدید) */
+  dailyStats?: { [isoDate: string]: StatBucket };
+  /** تاریخچه ساعتی هر ۴ متریک، کلید به شکل ISO یعنی YYYY-MM-DDTHH (برای بازه ۲۴ ساعت) */
+  hourlyStats?: { [isoHour: string]: StatBucket };
 }
 
 export interface CardData {

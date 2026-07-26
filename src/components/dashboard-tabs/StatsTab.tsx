@@ -2,13 +2,12 @@ import React from "react";
 import { Copy, ExternalLink, Crown, RefreshCw } from "lucide-react";
 import { CardData, User, AdvertisingBanner } from "../../types";
 import { SubscriptionInfo } from "../../hooks/useSubscription";
+import VisitsChart from "./VisitsChart";
 
 interface StatsTabProps {
   user: User;
   cardData: CardData;
   banners: AdvertisingBanner[];
-  chartData: { label: string; value: number }[];
-  maxChartVal: number;
   handleCopyLink: (link: string) => void;
   subscription: SubscriptionInfo | null;
   subscriptionLoading: boolean;
@@ -21,8 +20,6 @@ export default function StatsTab({
   user,
   cardData,
   banners,
-  chartData,
-  maxChartVal,
   handleCopyLink,
   subscription,
   subscriptionLoading,
@@ -200,92 +197,8 @@ export default function StatsTab({
             </div>
           </div>
 
-          {/* Simulated interactive last 7 days chart - native SVG with CSS transitions */}
-<div className="p-6 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-4">
-  <div className="flex items-center justify-between">
-    <h3 className="font-extrabold text-sm text-slate-800">
-      نمودار بازدیدهای ۷ روز اخیر کارت شما
-    </h3>
-
-    <span className="text-xs text-slate-500">
-      تاریخ شمسی
-    </span>
-  </div>
-
-  <div className="relative h-[240px]">
-
-    {/* Background lines */}
-    <div className="absolute inset-0 flex flex-col justify-between pb-8 pointer-events-none">
-      {[0,1,2,3,4].map((i) => (
-        <div
-          key={i}
-          className="border-t border-slate-200 w-full"
-        />
-      ))}
-    </div>
-
-    {/* Bars */}
-    <div className="absolute inset-0 flex items-end justify-between gap-2">
-      {chartData.map((d, idx) => {
-        const percent =
-          maxChartVal > 0
-            ? (d.value / maxChartVal) * 100
-            : 0;
-
-        return (
-          <div
-            key={idx}
-            className="flex-1 flex flex-col items-center justify-end h-full group relative"
-          >
-            {/* Tooltip */}
-            <div className="absolute bottom-[calc(var(--bar-height)+55px)] opacity-0 group-hover:opacity-100 transition-all duration-200 z-20">
-              <div className="bg-slate-900 text-white text-[11px] font-bold px-2 py-1 rounded-lg whitespace-nowrap shadow-lg">
-                {d.value} بازدید
-              </div>
-            </div>
-
-            {/* Bar */}
-            <div
-              className="
-                w-full max-w-[38px]
-                rounded-t-xl
-                bg-gradient-to-t
-                from-blue-600
-                via-blue-500
-                to-cyan-400
-                shadow-lg
-                transition-all
-                duration-500
-                hover:scale-105
-                hover:brightness-110
-                relative
-                overflow-hidden
-              "
-              style={{
-                height: `${Math.max(percent, d.value > 0 ? 12 : 4)}%`,
-                ['--bar-height' as any]:
-                  `${Math.max(percent, d.value > 0 ? 12 : 4)}%`
-              }}
-            >
-              {/* Shine effect */}
-              <div className="absolute inset-0 bg-gradient-to-b from-white/30 to-transparent opacity-60" />
-            </div>
-
-            {/* Value */}
-            <span className="mt-2 text-xs font-bold text-slate-700">
-              {d.value}
-            </span>
-
-            {/* Date label */}
-            <span className="text-[10px] text-slate-500 mt-1 text-center leading-4">
-              {d.label}
-            </span>
-          </div>
-        );
-      })}
-    </div>
-  </div>
-</div>
+          {/* نمودار چند-متریکی آمار بازدید (مثل گزارش عملکرد سرچ کنسول) */}
+          <VisitsChart stats={cardData.stats} />
 
           {/* Sub-Banners (Banner 2 & 3) */}
           {banners.length > 1 && (
