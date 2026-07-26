@@ -13,6 +13,50 @@ export default function QrCodeTab({
   handleRequestQrCode,
   handleCopyLink,
 }: QrCodeTabProps) {
+  const [downloading, setDownloading] = React.useState<"white" | "transparent" | null>(null);
+
+  // دانلود کیوآرکد به‌صورت PNG — با پس‌زمینه سفید یا بدون پس‌زمینه (شفاف)
+  const downloadQr = (withWhiteBackground: boolean) => {
+    if (!user.qrImageUrl) return;
+    setDownloading(withWhiteBackground ? "white" : "transparent");
+
+    const img = new window.Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.naturalWidth || 512;
+        canvas.height = img.naturalHeight || 512;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+
+        if (withWhiteBackground) {
+          ctx.fillStyle = "#FFFFFF";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+        const dataUrl = canvas.toDataURL("image/png");
+        const link = document.createElement("a");
+        link.href = dataUrl;
+        link.download = `QR_${user.username}_${withWhiteBackground ? "white-bg" : "transparent"}.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } catch (err) {
+        console.error(err);
+        alert("خطا در پردازش تصویر کیوآرکد برای دانلود.");
+      } finally {
+        setDownloading(null);
+      }
+    };
+    img.onerror = () => {
+      alert("خطا در بارگذاری تصویر کیوآرکد.");
+      setDownloading(null);
+    };
+    img.src = user.qrImageUrl;
+  };
+
   return (
         <div className="space-y-8 text-right max-w-4xl mx-auto">
           <div>
@@ -119,14 +163,24 @@ export default function QrCodeTab({
               </div>
 
               {user.qrRequestStatus === "approved" && user.qrImageUrl && (
-                <a
-                  href={user.qrImageUrl}
-                  download={`QR_${user.username}.png`}
-                  className="w-full py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition flex items-center justify-center gap-2 shadow-sm cursor-pointer"
-                >
-                  <Download className="w-4.5 h-4.5" />
-                  دانلود کیوآرکد به صورت PNG با کیفیت عالی جهت چاپ
-                </a>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <button
+                    onClick={() => downloadQr(true)}
+                    disabled={downloading !== null}
+                    className="w-full py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition flex items-center justify-center gap-2 shadow-sm cursor-pointer disabled:opacity-60"
+                  >
+                    <Download className="w-4.5 h-4.5" />
+                    {downloading === "white" ? "در حال آماده‌سازی..." : "دانلود با پس‌زمینه سفید"}
+                  </button>
+                  <button
+                    onClick={() => downloadQr(false)}
+                    disabled={downloading !== null}
+                    className="w-full py-3.5 rounded-xl bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold transition flex items-center justify-center gap-2 shadow-sm cursor-pointer disabled:opacity-60"
+                  >
+                    <Download className="w-4.5 h-4.5" />
+                    {downloading === "transparent" ? "در حال آماده‌سازی..." : "دانلود بدون پس‌زمینه (شفاف)"}
+                  </button>
+                </div>
               )}
             </div>
           </div>

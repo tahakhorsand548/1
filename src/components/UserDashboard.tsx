@@ -713,21 +713,25 @@ export default function UserDashboard({
       {/* 2. CHIEF WORKSPACE CONTENT */}
       <main className="flex-1 p-4 md:p-8 overflow-y-auto min-h-[calc(100vh-140px)] md:max-h-screen pb-24 md:pb-8">
         {/* Top Header Ad Banner (Banner 1) */}
-        {banners.length > 0 && banners[0] && banners[0].imageUrl && (
-          <a
-            href={banners[0].link || "#"}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="block w-full h-16 md:h-24 bg-white rounded-2xl overflow-hidden mb-6 border border-slate-200/80 shadow-sm relative group cursor-pointer transition hover:opacity-95"
-          >
-            <img
-              src={banners[0].imageUrl}
-              className="w-full h-full object-cover"
-              alt={banners[0].title || "Advertisement"}
-              title={banners[0].title}
-            />
-          </a>
-        )}
+        {(() => {
+          const mainBanner = banners.find((b) => b.id === "banner1");
+          if (!mainBanner || !mainBanner.imageUrl) return null;
+          return (
+            <a
+              href={mainBanner.link || "#"}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block w-full h-16 md:h-24 bg-white rounded-2xl overflow-hidden mb-6 border border-slate-200/80 shadow-sm relative group cursor-pointer transition hover:opacity-95"
+            >
+              <img
+                src={mainBanner.imageUrl}
+                className="w-full h-full object-cover"
+                alt={mainBanner.title || "Advertisement"}
+                title={mainBanner.title}
+              />
+            </a>
+          );
+        })()}
 
         {/* Global Banner Announcement if active from admin */}
         {announcements

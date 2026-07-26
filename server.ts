@@ -164,6 +164,10 @@ try { db.exec(`ALTER TABLE subscription_purchases ADD COLUMN expire_date TEXT NO
 try { db.exec(`ALTER TABLE tickets ADD COLUMN last_message_at TEXT NOT NULL DEFAULT ''`); } catch {}
 try { db.exec(`ALTER TABLE tickets ADD COLUMN admin_last_read_at TEXT NOT NULL DEFAULT ''`); } catch {}
 
+try { db.exec(`ALTER TABLE banners ADD COLUMN link_url TEXT NOT NULL DEFAULT ''`); } catch {}
+try { db.exec(`ALTER TABLE banners ADD COLUMN video_url TEXT NOT NULL DEFAULT ''`); } catch {}
+try { db.exec(`ALTER TABLE users ADD COLUMN qr_approved_at TEXT NOT NULL DEFAULT ''`); } catch {}
+
 // برای تیکت‌های قدیمی‌ای که last_message_at خالی مانده (قبل از این مهاجرت)،
 // created_at را به‌عنوان جایگزین در نظر می‌گیریم تا مرتب‌سازی خراب نشود.
 try {
@@ -479,6 +483,17 @@ const upload = multer({
   },
 });
 
+// ─── آپلود ویدیوی آموزشی (فقط ادمین، حجم بیشتر چون فایل ویدیویی است) ─────────
+const videoUpload = multer({
+  storage,
+  limits: { fileSize: 80 * 1024 * 1024 }, // حداکثر 80MB
+  fileFilter: (req, file, cb) => {
+    const allowed = ["video/mp4", "video/webm", "video/quicktime", "video/ogg"];
+    if (allowed.includes(file.mimetype)) cb(null, true);
+    else cb(new Error("فقط فایل‌های ویدیویی (mp4, webm, mov) مجاز هستند."));
+  },
+});
+
 // ─── Middleware ───────────────────────────────────────────────────────────────
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());
@@ -563,6 +578,12 @@ app.post("/api/upload", verifyToken, upload.single("image"), (req: any, res) => 
 
 // آپلود برای ادمین (QR و بنر)
 app.post("/api/admin/upload", verifyAdmin, upload.single("image"), (req: any, res) => {
+  if (!req.file) return res.status(400).json({ message: "فایلی ارسال نشد." });
+  const fileUrl = `/uploads/admin/${req.file.filename}`;
+  return res.json({ url: fileUrl });
+});
+
+app.post("/api/admin/upload-video", verifyAdmin, videoUpload.single("video"), (req: any, res) => {
   if (!req.file) return res.status(400).json({ message: "فایلی ارسال نشد." });
   const fileUrl = `/uploads/admin/${req.file.filename}`;
   return res.json({ url: fileUrl });
@@ -954,29 +975,87 @@ app.get("/api/admin/stats", verifyAdmin, (req, res) => {
     `SELECT COUNT(*) as c FROM subscriptions WHERE status='active' AND expire_date > ? AND LOWER(username) != 'admin'`
   ).get(new Date().toISOString()) as any).c;
 
-  // تجمیع تاریخچه روزانه/ساعتی همه کاربران، برای نمودار کلی «آمار بازدید سایت» در پیشخوان ادمین
-  const dailyStats: Record<string, { visits: number; scans: number; linkOpens: number; buttonClicks: number }> = {};
-  const hourlyStats: Record<string, { visits: number; scans: number; linkOpens: number; buttonClicks: number }> = {};
-
+  // ── تجمیع بازدید روزانه/ساعتی سایت (از دیتای هر کارت) ──
+  const dailyVisits: Record<string, number> = {};
+  const hourlyVisits: Record<string, number> = {};
   rows.forEach((r) => {
     let cd: any = {};
     try { cd = JSON.parse(r.card_data); } catch { return; }
-    const daily = cd?.stats?.dailyStats || {};
-    const hourly = cd?.stats?.hourlyStats || {};
-    Object.entries(daily).forEach(([key, val]: [string, any]) => {
-      if (!dailyStats[key]) dailyStats[key] = { visits: 0, scans: 0, linkOpens: 0, buttonClicks: 0 };
-      dailyStats[key].visits += val.visits || 0;
-      dailyStats[key].scans += val.scans || 0;
-      dailyStats[key].linkOpens += val.linkOpens || 0;
-      dailyStats[key].buttonClicks += val.buttonClicks || 0;
+    Object.entries(cd?.stats?.dailyStats || {}).forEach(([key, val]: [string, any]) => {
+      dailyVisits[key] = (dailyVisits[key] || 0) + (val.visits || 0);
     });
-    Object.entries(hourly).forEach(([key, val]: [string, any]) => {
-      if (!hourlyStats[key]) hourlyStats[key] = { visits: 0, scans: 0, linkOpens: 0, buttonClicks: 0 };
-      hourlyStats[key].visits += val.visits || 0;
-      hourlyStats[key].scans += val.scans || 0;
-      hourlyStats[key].linkOpens += val.linkOpens || 0;
-      hourlyStats[key].buttonClicks += val.buttonClicks || 0;
+    Object.entries(cd?.stats?.hourlyStats || {}).forEach(([key, val]: [string, any]) => {
+      hourlyVisits[key] = (hourlyVisits[key] || 0) + (val.visits || 0);
     });
+  });
+
+  // ── مشتریان جدید در هر روز/ساعت (بر اساس زمان ثبت‌نام) ──
+  const signupRows = db.prepare(
+    `SELECT created_at FROM subscriptions WHERE LOWER(username) != 'admin'`
+  ).all() as any[];
+  const dailySignups: Record<string, number> = {};
+  const hourlySignups: Record<string, number> = {};
+  signupRows.forEach((s) => {
+    if (!s.created_at) return;
+    const dKey = s.created_at.slice(0, 10);
+    const hKey = s.created_at.slice(0, 13);
+    dailySignups[dKey] = (dailySignups[dKey] || 0) + 1;
+    hourlySignups[hKey] = (hourlySignups[hKey] || 0) + 1;
+  });
+
+  // ── تایید کیوآرکد در هر روز/ساعت ──
+  const qrRows = db.prepare(
+    `SELECT qr_approved_at FROM users WHERE qr_approved_at != ''`
+  ).all() as any[];
+  const dailyQrApprovals: Record<string, number> = {};
+  const hourlyQrApprovals: Record<string, number> = {};
+  qrRows.forEach((q) => {
+    const dKey = q.qr_approved_at.slice(0, 10);
+    const hKey = q.qr_approved_at.slice(0, 13);
+    dailyQrApprovals[dKey] = (dailyQrApprovals[dKey] || 0) + 1;
+    hourlyQrApprovals[hKey] = (hourlyQrApprovals[hKey] || 0) + 1;
+  });
+
+  // ── فعال‌سازی پلن پرو در هر روز/ساعت ──
+  const proRows = db.prepare(
+    `SELECT approved_at FROM subscription_purchases WHERE payment_status='approved' AND approved_at != ''`
+  ).all() as any[];
+  const dailyProActivations: Record<string, number> = {};
+  const hourlyProActivations: Record<string, number> = {};
+  proRows.forEach((p) => {
+    const dKey = p.approved_at.slice(0, 10);
+    const hKey = p.approved_at.slice(0, 13);
+    dailyProActivations[dKey] = (dailyProActivations[dKey] || 0) + 1;
+    hourlyProActivations[hKey] = (hourlyProActivations[hKey] || 0) + 1;
+  });
+
+  // ترکیب هر ۴ متریک، دقیقا معادل ۴ کارت آماری بالای پیشخوان ادمین
+  const allDailyKeys = new Set([
+    ...Object.keys(dailyVisits), ...Object.keys(dailySignups),
+    ...Object.keys(dailyQrApprovals), ...Object.keys(dailyProActivations),
+  ]);
+  const dailyStats: Record<string, { visits: number; signups: number; qrApprovals: number; proActivations: number }> = {};
+  allDailyKeys.forEach((k) => {
+    dailyStats[k] = {
+      visits: dailyVisits[k] || 0,
+      signups: dailySignups[k] || 0,
+      qrApprovals: dailyQrApprovals[k] || 0,
+      proActivations: dailyProActivations[k] || 0,
+    };
+  });
+
+  const allHourlyKeys = new Set([
+    ...Object.keys(hourlyVisits), ...Object.keys(hourlySignups),
+    ...Object.keys(hourlyQrApprovals), ...Object.keys(hourlyProActivations),
+  ]);
+  const hourlyStats: Record<string, { visits: number; signups: number; qrApprovals: number; proActivations: number }> = {};
+  allHourlyKeys.forEach((k) => {
+    hourlyStats[k] = {
+      visits: hourlyVisits[k] || 0,
+      signups: hourlySignups[k] || 0,
+      qrApprovals: hourlyQrApprovals[k] || 0,
+      proActivations: hourlyProActivations[k] || 0,
+    };
   });
 
   return res.json({ totalCustomers, cardsWithQr, totalVisits, proUsersCount, dailyStats, hourlyStats });
@@ -1280,8 +1359,8 @@ app.get("/api/admin/qr-requests", verifyAdmin, (req, res) => {
 app.post("/api/admin/qr-requests/:username/approve", verifyAdmin, (req, res) => {
   const { qrImageUrl } = req.body;
   if (!qrImageUrl) return res.status(400).json({ message: "آدرس QR الزامی است." });
-  const result = db.prepare("UPDATE users SET qr_request_status='approved',qr_image_url=? WHERE LOWER(username)=LOWER(?)")
-    .run(qrImageUrl, req.params.username);
+  const result = db.prepare("UPDATE users SET qr_request_status='approved',qr_image_url=?,qr_approved_at=? WHERE LOWER(username)=LOWER(?)")
+    .run(qrImageUrl, new Date().toISOString(), req.params.username);
   if (!result.changes) return res.status(404).json({ message: "کاربر یافت نشد." });
   return res.json({ message: "QR کاربر تأیید شد." });
 });
@@ -1329,15 +1408,21 @@ app.delete("/api/admin/announcements/:id", verifyAdmin, (req, res) => {
 // ─── Banners ──────────────────────────────────────────────────────────────────
 app.get("/api/banners", (req, res) => {
   return res.json(db.prepare("SELECT * FROM banners").all()
-    .map((b: any) => ({ ...b, imageUrl: b.image_url })));
+    .map((b: any) => ({ ...b, imageUrl: b.image_url, link: b.link_url, videoUrl: b.video_url })));
 });
 
 app.post("/api/admin/banners", verifyAdmin, (req, res) => {
-  const { banner1, banner2, banner3 } = req.body;
-  const upsert = db.prepare("INSERT OR REPLACE INTO banners (id,image_url,title) VALUES (?,?,?)");
-  upsert.run("banner1", banner1 || "", "بنر اول");
-  upsert.run("banner2", banner2 || "", "بنر دوم");
-  upsert.run("banner3", banner3 || "", "بنر سوم");
+  const {
+    banner1, title1, link1,
+    banner2, title2, link2,
+    banner3, title3, link3,
+    trainingVideoUrl, trainingVideoTitle,
+  } = req.body;
+  const upsert = db.prepare("INSERT OR REPLACE INTO banners (id,image_url,title,link_url,video_url) VALUES (?,?,?,?,?)");
+  upsert.run("banner1", banner1 || "", title1 || "بنر اول", link1 || "", "");
+  upsert.run("banner2", banner2 || "", title2 || "بنر دوم", link2 || "", "");
+  upsert.run("banner3", banner3 || "", title3 || "بنر سوم", link3 || "", "");
+  upsert.run("training_video", "", trainingVideoTitle || "ویدیو آموزشی", "", trainingVideoUrl || "");
   return res.json({ message: "بنرها ویرایش شد.", banners: db.prepare("SELECT * FROM banners").all() });
 });
 

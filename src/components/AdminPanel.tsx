@@ -74,8 +74,8 @@ export default function AdminPanel({
     cardsWithQr: 0,
     totalVisits: 0,
     proUsersCount: 0,
-    dailyStats: {} as Record<string, { visits: number; scans: number; linkOpens: number; buttonClicks: number }>,
-    hourlyStats: {} as Record<string, { visits: number; scans: number; linkOpens: number; buttonClicks: number }>,
+    dailyStats: {} as Record<string, Record<string, number>>,
+    hourlyStats: {} as Record<string, Record<string, number>>,
   });
   //serch user
   const [userSearch, setUserSearch] = useState("");
@@ -152,6 +152,11 @@ const filteredUsers = usersList.filter((u) => {
   const [adBanner1, setAdBanner1] = useState("");
   const [adBanner2, setAdBanner2] = useState("");
   const [adBanner3, setAdBanner3] = useState("");
+
+  // ویدیوی آموزشی (نمایش داده‌شده در پیشخوان کاربر، بین بخش خوش‌آمدگویی و آمار)
+  const [trainingVideoTitle, setTrainingVideoTitle] = useState("");
+  const [trainingVideoUrl, setTrainingVideoUrl] = useState("");
+  const [trainingVideoUploading, setTrainingVideoUploading] = useState(false);
 
 
   // تایید خرید کاربران
@@ -323,16 +328,28 @@ const filteredUsers = usersList.filter((u) => {
       const bannersRes = await apiFetch("/api/banners");
       if (bannersRes.ok) {
         const ban = await bannersRes.json();
-        if (ban && ban.length >= 3) {
-          setAdBanner1(ban[0].imageUrl);
-          setAdTitle1(ban[0].title || "");
-          setAdLink1(ban[0].link || "");
-          setAdBanner2(ban[1].imageUrl);
-          setAdTitle2(ban[1].title || "");
-          setAdLink2(ban[1].link || "");
-          setAdBanner3(ban[2].imageUrl);
-          setAdTitle3(ban[2].title || "");
-          setAdLink3(ban[2].link || "");
+        const b1 = ban.find((b: any) => b.id === "banner1");
+        const b2 = ban.find((b: any) => b.id === "banner2");
+        const b3 = ban.find((b: any) => b.id === "banner3");
+        const video = ban.find((b: any) => b.id === "training_video");
+        if (b1) {
+          setAdBanner1(b1.imageUrl);
+          setAdTitle1(b1.title || "");
+          setAdLink1(b1.link || "");
+        }
+        if (b2) {
+          setAdBanner2(b2.imageUrl);
+          setAdTitle2(b2.title || "");
+          setAdLink2(b2.link || "");
+        }
+        if (b3) {
+          setAdBanner3(b3.imageUrl);
+          setAdTitle3(b3.title || "");
+          setAdLink3(b3.link || "");
+        }
+        if (video) {
+          setTrainingVideoTitle(video.title || "");
+          setTrainingVideoUrl(video.videoUrl || "");
         }
       }
       // 7. Subscription Purchases
@@ -728,6 +745,8 @@ const filteredUsers = usersList.filter((u) => {
           banner3: adBanner3,
           title3: adTitle3,
           link3: adLink3,
+          trainingVideoUrl,
+          trainingVideoTitle,
         }),
       });
       if (res.ok) {
@@ -736,6 +755,30 @@ const filteredUsers = usersList.filter((u) => {
       }
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  // آپلود فایل ویدیوی آموزشی
+  const handleUploadTrainingVideo = async (file: File) => {
+    setTrainingVideoUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("video", file);
+      const res = await apiFetch("/api/admin/upload-video", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      if (res.ok && data.url) {
+        setTrainingVideoUrl(data.url);
+      } else {
+        alert(data.message || "خطا در بارگذاری ویدیو.");
+      }
+    } catch (e) {
+      console.error(e);
+      alert("خطای اتصال به سرور.");
+    } finally {
+      setTrainingVideoUploading(false);
     }
   };
 
@@ -1053,17 +1096,17 @@ const filteredUsers = usersList.filter((u) => {
               </div>
             </div>
 
-            {/* نمودار کلی آمار بازدید سایت (مثل نمودار جدید پنل کاربر) */}
+            {/* نمودار کلی عملکرد پلتفرم — دقیقاً معادل ۴ کارت آماری بالا */}
             <VisitsChart
-              stats={{
-                totalVisits: deskStats.totalVisits,
-                scans: 0,
-                linkOpens: 0,
-                buttonClicks: 0,
-                dailyVisits: {},
-                dailyStats: deskStats.dailyStats,
-                hourlyStats: deskStats.hourlyStats,
-              }}
+              title="نمودار عملکرد کلی پلتفرم"
+              dailyStats={deskStats.dailyStats}
+              hourlyStats={deskStats.hourlyStats}
+              metrics={[
+                { key: "signups", label: "مشتریان جدید", color: "#6366F1" },
+                { key: "qrApprovals", label: "کیوآرکد تایید شده", color: "#10B981" },
+                { key: "visits", label: "بازدید کارت‌ها", color: "#FB923C" },
+                { key: "proActivations", label: "فعال‌سازی اشتراک پرو", color: "#F59E0B" },
+              ]}
             />
 
             {/* Quick alert notifications sections */}
@@ -1264,6 +1307,7 @@ const filteredUsers = usersList.filter((u) => {
                     <th className="pb-3 px-2 text-center">
                       وضعیت حساب / فعالیت
                     </th>
+                    <th className="pb-3 px-2 text-center">اشتراک</th>
                     <th className="pb-3 px-2 text-left">عملیات ادیمن</th>
                   </tr>
                 </thead>
@@ -1271,7 +1315,7 @@ const filteredUsers = usersList.filter((u) => {
                   {filteredUsers.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={6}
+                        colSpan={7}
                         className="text-center py-6 text-slate-500"
                       >
                        هیچ کاربری با این مشخصات پیدا نشد.
@@ -1302,6 +1346,27 @@ const filteredUsers = usersList.filter((u) => {
                               فعال 
                             </span>
                           )}
+                        </td>
+                        <td className="py-3 px-2 text-center">
+                          {(() => {
+                            const sub = subscriptionsOverview.find(
+                              (o) => o.username === u.username,
+                            );
+                            const isPro =
+                              sub &&
+                              sub.status === "active" &&
+                              sub.remainingDays > 0;
+                            return isPro ? (
+                              <span className="inline-flex items-center gap-1 py-0.5 px-2.5 bg-gradient-to-r from-amber-400 to-orange-500 text-white rounded-full font-bold text-[10px]">
+                                <Crown className="w-3 h-3" />
+                                {sub.remainingDays} روز
+                              </span>
+                            ) : (
+                              <span className="py-0.5 px-2.5 bg-slate-800 text-slate-400 border border-slate-700 rounded-full font-bold text-[10px]">
+                                فری
+                              </span>
+                            );
+                          })()}
                         </td>
                         <td className="py-3 px-2 text-left">
                           <div className="flex flex-wrap items-center justify-end gap-1.5">
@@ -1783,105 +1848,6 @@ const filteredUsers = usersList.filter((u) => {
 
           <div className="space-y-8">
 
-            {/* ── گزارش وضعیت اشتراک کاربران (ثبت‌نام / پلن فعلی / بازه اعتبار) ── */}
-            <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6">
-              <div className="mb-6">
-                <h2 className="text-xl font-bold text-white">
-                  وضعیت اشتراک کاربران
-                </h2>
-                <p className="text-xs text-slate-500 mt-1">
-                  تاریخ ثبت‌نام، پلن فعلی و بازه اعتبار اشتراک هر کاربر. برای
-                  افزودن لایسنس یا مدیریت هر کاربر، از دکمه «مدیریت» همان ردیف
-                  استفاده کنید.
-                </p>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-700 text-slate-400">
-                      <th className="py-3">کاربر</th>
-                      <th>نام</th>
-                      <th>تاریخ ثبت‌نام</th>
-                      <th>پلن فعلی</th>
-                      <th>وضعیت</th>
-                      <th>شروع اعتبار</th>
-                      <th>پایان اعتبار</th>
-                      <th>روز باقیمانده</th>
-                      <th>عملیات</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {subscriptionsOverview.map((row) => (
-                      <tr
-                        key={row.username}
-                        className="border-b border-slate-800 text-center hover:bg-slate-800/40 transition"
-                      >
-                        <td className="py-4 font-mono">{row.username}</td>
-                        <td>{row.full_name}</td>
-                        <td className="text-xs text-slate-400">
-                          {row.registered_at
-                            ? new Date(row.registered_at).toLocaleString("fa-IR")
-                            : "نامشخص"}
-                        </td>
-                        <td>
-                          {MANUAL_PLAN_OPTIONS.find((p) => p.code === row.plan)?.label ||
-                            row.plan ||
-                            "رایگان"}
-                        </td>
-                        <td>
-                          {row.status === "active" && row.remainingDays > 0 ? (
-                            <span className="bg-green-500/20 text-green-400 px-3 py-1 rounded-full text-xs">
-                              فعال
-                            </span>
-                          ) : (
-                            <span className="bg-slate-700/50 text-slate-400 px-3 py-1 rounded-full text-xs">
-                              غیرفعال
-                            </span>
-                          )}
-                        </td>
-                        <td className="text-xs text-slate-400">
-                          {row.start_date
-                            ? new Date(row.start_date).toLocaleString("fa-IR")
-                            : "-"}
-                        </td>
-                        <td className="text-xs text-slate-400">
-                          {row.expire_date
-                            ? new Date(row.expire_date).toLocaleString("fa-IR")
-                            : "-"}
-                        </td>
-                        <td className="font-bold">
-                          {row.status === "active" && row.remainingDays > 0
-                            ? `${row.remainingDays} روز`
-                            : "-"}
-                        </td>
-                        <td>
-                          <button
-                            onClick={() => {
-                              const u = usersList.find((x) => x.username === row.username);
-                              if (!u) return;
-                              setEditingUser(u);
-                              setEditFullName(u.fullName);
-                              setEditEmail(u.email);
-                              setEditPhone(u.phone);
-                              setEditPassword("");
-                              setEditUserModalTab("license");
-                              setActivatePlanCode("1m");
-                              setSelectedQrUser(u);
-                              setUploadedQrBase64(u.qrImageUrl || "");
-                            }}
-                            className="py-1.5 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-bold"
-                          >
-                            مدیریت
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
             {/* ── تاریخچه کامل درخواست‌ها/فعال‌سازی‌ها (کارت‌به‌کارت + دستی) ── */}
             <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6">
 
@@ -2011,6 +1977,7 @@ const filteredUsers = usersList.filter((u) => {
                           </button>
                         )}
 
+                          {purchase.payment_status !== "approved" && (
                           <button
                           onClick={() => deletePurchase(purchase.id)}
                           className="p-2 rounded-lg bg-red-600 hover:bg-red-700 text-white"
@@ -2018,6 +1985,7 @@ const filteredUsers = usersList.filter((u) => {
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
+                          )}
                         </td>
 
                       </tr>
@@ -2344,6 +2312,71 @@ const filteredUsers = usersList.filter((u) => {
                     />
                   )}
                 </div>
+              </div>
+
+              {/* ── ویدیوی آموزشی (نمایش در پیشخوان کاربر، بین خوش‌آمدگویی و آمار) ── */}
+              <div className="space-y-3 p-4 border border-slate-800 rounded-xl bg-slate-950/50">
+                <label className="text-xs font-bold text-slate-300 block">
+                  ویدیوی آموزشی پیشخوان کاربر :
+                </label>
+                <div className="flex gap-4">
+                  <div className="space-y-1.5 flex-1">
+                    <label className="text-[11px] text-slate-500">
+                      عنوان ویدیو :
+                    </label>
+                    <input
+                      type="text"
+                      value={trainingVideoTitle}
+                      onChange={(e) => setTrainingVideoTitle(e.target.value)}
+                      placeholder="مثلا: آموزش شروع کار با یوکارت"
+                      className="w-full bg-slate-950 border border-slate-850 focus:border-indigo-500 rounded-xl py-2 px-3 text-xs text-slate-200 outline-none"
+                    />
+                  </div>
+                  <div className="space-y-1.5 flex-1">
+                    <label className="text-[11px] text-slate-500">
+                      فایل ویدیو (mp4, webm) :
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={trainingVideoUrl}
+                        onChange={(e) => setTrainingVideoUrl(e.target.value)}
+                        placeholder="آدرس ویدیو یا بارگذاری فایل"
+                        className="flex-1 bg-slate-950 border border-slate-850 focus:border-indigo-500 rounded-xl py-2 px-3 text-xs text-slate-200 outline-none font-mono text-left"
+                      />
+                      <label className="flex items-center justify-center bg-slate-800 hover:bg-slate-700 w-[38px] rounded-xl cursor-pointer">
+                        {trainingVideoUploading ? (
+                          <RefreshCw className="w-4 h-4 text-slate-400 animate-spin" />
+                        ) : (
+                          <UploadCloud className="w-4 h-4 text-slate-400" />
+                        )}
+                        <input
+                          type="file"
+                          className="hidden"
+                          accept="video/mp4,video/webm,video/quicktime,video/ogg"
+                          disabled={trainingVideoUploading}
+                          onChange={(e) => {
+                            if (e.target.files && e.target.files[0]) {
+                              handleUploadTrainingVideo(e.target.files[0]);
+                            }
+                          }}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                </div>
+                {trainingVideoUrl && (
+                  <video
+                    src={trainingVideoUrl}
+                    controls
+                    className="w-64 rounded-lg mt-1 border border-white/5 bg-black"
+                  />
+                )}
+                <p className="text-[10px] text-slate-500">
+                  حداکثر حجم فایل: ۸۰ مگابایت. این ویدیو دقیقاً بین بخش
+                  خوش‌آمدگویی و کارت‌های آماری در پیشخوان کاربران نمایش داده
+                  می‌شود.
+                </p>
               </div>
 
               <button

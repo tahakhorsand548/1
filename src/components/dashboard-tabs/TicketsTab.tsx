@@ -148,6 +148,15 @@ export default function TicketsTab({
                               : "bg-slate-100 text-slate-800 rounded-bl-none border border-slate-200 shadow-xs"
                           }`}
                         >
+                          {m.attachment && (
+                            <a href={m.attachment} target="_blank" rel="noreferrer">
+                              <img
+                                src={m.attachment}
+                                alt="پیوست"
+                                className="rounded-xl max-w-[220px] max-h-[220px] object-cover mb-2 border border-black/5"
+                              />
+                            </a>
+                          )}
                           <p>{m.message}</p>
                           <span className="block text-[8px] opacity-60 mt-1.5 font-mono text-left">
                             {m.createdAt}

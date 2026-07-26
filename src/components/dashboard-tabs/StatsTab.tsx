@@ -106,6 +106,24 @@ export default function StatsTab({
             </div>
           </div>
 
+          {/* ویدیوی آموزشی (مدیریت‌شده از بخش بنرهای پنل ادمین) */}
+          {(() => {
+            const trainingVideo = banners.find((b) => b.id === "training_video");
+            if (!trainingVideo || !trainingVideo.videoUrl) return null;
+            return (
+              <div className="p-5 rounded-2xl bg-white border border-slate-200/80 shadow-sm space-y-3">
+                <h3 className="text-sm font-extrabold text-slate-800">
+                  {trainingVideo.title || "ویدیوی آموزشی"}
+                </h3>
+                <video
+                  src={trainingVideo.videoUrl}
+                  controls
+                  className="w-full rounded-xl bg-black max-h-[420px]"
+                />
+              </div>
+            );
+          })()}
+
           {/* 4 real statistical tiles */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="p-5 rounded-2xl bg-white border border-slate-200/60 shadow-sm flex flex-col justify-between">
@@ -198,32 +216,38 @@ export default function StatsTab({
           </div>
 
           {/* نمودار چند-متریکی آمار بازدید (مثل گزارش عملکرد سرچ کنسول) */}
-          <VisitsChart stats={cardData.stats} />
+          <VisitsChart
+            dailyStats={cardData.stats?.dailyStats || {}}
+            hourlyStats={cardData.stats?.hourlyStats || {}}
+          />
 
           {/* Sub-Banners (Banner 2 & 3) */}
-          {banners.length > 1 && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8">
-              {banners.slice(1, 3).map(
-                (b) =>
-                  b.imageUrl && (
-                    <a
-                      href={b.link || "#"}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      key={b.id}
-                      className="block w-full h-32 md:h-40 bg-white rounded-2xl overflow-hidden border border-slate-200/80 shadow-sm relative group cursor-pointer transition hover:opacity-95"
-                    >
-                      <img
-                        src={b.imageUrl}
-                        className="w-full h-full object-cover"
-                        alt={b.title || "Advertisement"}
-                        title={b.title}
-                      />
-                    </a>
-                  ),
-              )}
-            </div>
-          )}
+          {(() => {
+            const subBanners = banners.filter(
+              (b) => (b.id === "banner2" || b.id === "banner3") && b.imageUrl,
+            );
+            if (subBanners.length === 0) return null;
+            return (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8">
+                {subBanners.map((b) => (
+                  <a
+                    href={b.link || "#"}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    key={b.id}
+                    className="block w-full h-32 md:h-40 bg-white rounded-2xl overflow-hidden border border-slate-200/80 shadow-sm relative group cursor-pointer transition hover:opacity-95"
+                  >
+                    <img
+                      src={b.imageUrl}
+                      className="w-full h-full object-cover"
+                      alt={b.title || "Advertisement"}
+                      title={b.title}
+                    />
+                  </a>
+                ))}
+              </div>
+            );
+          })()}
         </div>
   );
 }

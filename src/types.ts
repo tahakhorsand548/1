@@ -42,6 +42,7 @@ export interface StatBucket {
   scans: number;
   linkOpens: number;
   buttonClicks: number;
+  [key: string]: number;
 }
 
 export interface CardStats {
@@ -134,4 +135,6 @@ export interface AdvertisingBanner {
   imageUrl: string;
   title: string;
   link?: string;
+  /** فقط برای اسلات ویدیوی آموزشی (id === 'training_video') استفاده می‌شود */
+  videoUrl?: string;
 }

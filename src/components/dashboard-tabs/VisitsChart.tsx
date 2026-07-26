@@ -1,24 +1,22 @@
 import React from "react";
-import { CardStats } from "../../types";
 
-type MetricKey = "visits" | "scans" | "buttonClicks" | "linkOpens";
-type RangeKey = "24h" | "7d" | "1m" | "6m";
+export type RangeKey = "24h" | "7d" | "1m" | "6m";
+
+export interface ChartMetric {
+  key: string;
+  label: string;
+  color: string;
+}
+
+export interface ChartBucketMap {
+  [isoKey: string]: Record<string, number>;
+}
 
 interface Point {
   label: string;
   fullLabel: string;
-  visits: number;
-  scans: number;
-  linkOpens: number;
-  buttonClicks: number;
+  [metricKey: string]: string | number;
 }
-
-const METRICS: { key: MetricKey; label: string; color: string }[] = [
-  { key: "visits", label: "کل بازدید", color: "#2563EB" },
-  { key: "scans", label: "اسکن بارکد (QR)", color: "#9333EA" },
-  { key: "buttonClicks", label: "کلیک دکمه‌ها", color: "#F59E0B" },
-  { key: "linkOpens", label: "بازدید لینک مستقیم", color: "#059669" },
-];
 
 const RANGES: { key: RangeKey; label: string }[] = [
   { key: "24h", label: "۲۴ ساعت" },
@@ -27,9 +25,13 @@ const RANGES: { key: RangeKey; label: string }[] = [
   { key: "6m", label: "۶ ماه" },
 ];
 
-function emptyBucket() {
-  return { visits: 0, scans: 0, linkOpens: 0, buttonClicks: 0 };
-}
+const DEFAULT_METRICS: ChartMetric[] = [
+  { key: "visits", label: "کل بازدید", color: "#2563EB" },
+  { key: "scans", label: "اسکن بارکد (QR)", color: "#9333EA" },
+  { key: "buttonClicks", label: "کلیک دکمه‌ها", color: "#F59E0B" },
+  { key: "linkOpens", label: "بازدید لینک مستقیم", color: "#059669" },
+];
+
 function isoDateKey(d: Date) {
   return d.toISOString().slice(0, 10);
 }
@@ -37,16 +39,20 @@ function isoHourKey(d: Date) {
   return d.toISOString().slice(0, 13);
 }
 
-function buildPoints(stats: CardStats, range: RangeKey): Point[] {
-  const daily = stats.dailyStats || {};
-  const hourly = stats.hourlyStats || {};
+function buildPoints(
+  dailyBuckets: ChartBucketMap,
+  hourlyBuckets: ChartBucketMap,
+  metricKeys: string[],
+  range: RangeKey,
+): Point[] {
   const now = new Date();
+  const emptyBucket = () => Object.fromEntries(metricKeys.map((k) => [k, 0]));
 
   if (range === "24h") {
     const points: Point[] = [];
     for (let i = 23; i >= 0; i--) {
       const d = new Date(now.getTime() - i * 3600 * 1000);
-      const b = hourly[isoHourKey(d)] || emptyBucket();
+      const b = hourlyBuckets[isoHourKey(d)] || emptyBucket();
       points.push({
         label: d.toLocaleTimeString("fa-IR", { hour: "2-digit" }),
         fullLabel: d.toLocaleString("fa-IR", {
@@ -66,7 +72,7 @@ function buildPoints(stats: CardStats, range: RangeKey): Point[] {
     const points: Point[] = [];
     for (let i = days - 1; i >= 0; i--) {
       const d = new Date(now.getTime() - i * 86400000);
-      const b = daily[isoDateKey(d)] || emptyBucket();
+      const b = dailyBuckets[isoDateKey(d)] || emptyBucket();
       points.push({
         label: d.toLocaleDateString("fa-IR", { day: "2-digit", month: "2-digit" }),
         fullLabel: d.toLocaleDateString("fa-IR", {
@@ -88,12 +94,11 @@ function buildPoints(stats: CardStats, range: RangeKey): Point[] {
     const agg = emptyBucket();
     for (let d = 0; d < 7; d++) {
       const day = new Date(weekEnd.getTime() - d * 86400000);
-      const b = daily[isoDateKey(day)];
+      const b = dailyBuckets[isoDateKey(day)];
       if (b) {
-        agg.visits += b.visits || 0;
-        agg.scans += b.scans || 0;
-        agg.linkOpens += b.linkOpens || 0;
-        agg.buttonClicks += b.buttonClicks || 0;
+        metricKeys.forEach((k) => {
+          agg[k] = (agg[k] as number) + (b[k] || 0);
+        });
       }
     }
     const weekStart = new Date(weekEnd.getTime() - 6 * 86400000);
@@ -107,25 +112,50 @@ function buildPoints(stats: CardStats, range: RangeKey): Point[] {
 }
 
 interface VisitsChartProps {
-  stats: CardStats;
+  /** تاریخچه روزانه به‌ازای هر متریک، کلید ISO یعنی YYYY-MM-DD */
+  dailyStats: ChartBucketMap;
+  /** تاریخچه ساعتی به‌ازای هر متریک، کلید ISO یعنی YYYY-MM-DDTHH */
+  hourlyStats: ChartBucketMap;
+  /** مجموعه متریک‌های قابل‌نمایش (پیش‌فرض: ۴ متریک آمار بازدید کارت) */
+  metrics?: ChartMetric[];
+  /** عنوان نمودار */
+  title?: string;
 }
 
 /**
- * نمودار چند-متریکی آمار بازدید کارت — الهام‌گرفته از ظاهر و رفتار گزارش
- * عملکرد گوگل سرچ کنسول: چیپ‌های بالای نمودار برای فعال/غیرفعال کردن هر
- * سری، بازه زمانی قابل‌تنظیم (۲۴ ساعت / ۷ روز / ۱ ماه / ۶ ماه)، و تولتیپ
- * تعاملی روی نمودار خطی.
+ * نمودار چند-متریکی — الهام‌گرفته از ظاهر و رفتار گزارش عملکرد گوگل سرچ
+ * کنسول: چیپ‌های بالای نمودار برای فعال/غیرفعال کردن هر سری، بازه زمانی
+ * قابل‌تنظیم (۲۴ ساعت / ۷ روز / ۱ ماه / ۶ ماه)، و تولتیپ تعاملی.
+ *
+ * نکته مهم درباره جهت نمودار: محور زمان همیشه از چپ (قدیم‌ترین) به راست
+ * (جدیدترین/امروز) رسم می‌شود — دقیقاً مثل خود گوگل سرچ کنسول، حتی در
+ * زبان‌های راست‌به‌چپ. به همین دلیل ناحیهٔ ترسیم عمداً dir="ltr" است
+ * تا با محاسبات SVG (که ذاتاً چپ‌به‌راست‌اند) همسو بماند و برچسب‌های محور
+ * برعکس نمایش داده نشوند.
  */
-export default function VisitsChart({ stats }: VisitsChartProps) {
+export default function VisitsChart({
+  dailyStats,
+  hourlyStats,
+  metrics = DEFAULT_METRICS,
+  title = "نمودار آمار بازدید کارت",
+}: VisitsChartProps) {
+  const metricKeys = React.useMemo(() => metrics.map((m) => m.key), [metrics]);
+
   const [range, setRange] = React.useState<RangeKey>("7d");
-  const [visible, setVisible] = React.useState<Set<MetricKey>>(
-    new Set(METRICS.map((m) => m.key)),
-  );
+  const [visible, setVisible] = React.useState<Set<string>>(new Set(metricKeys));
   const [hoverIndex, setHoverIndex] = React.useState<number | null>(null);
 
-  const points = React.useMemo(() => buildPoints(stats, range), [stats, range]);
+  // اگر مجموعه متریک‌ها عوض شود (مثلا کاربر/ادمین)، سری‌های قابل‌نمایش هم بازنشانی شود
+  React.useEffect(() => {
+    setVisible(new Set(metricKeys));
+  }, [metricKeys.join(",")]);
 
-  const toggleMetric = (key: MetricKey) => {
+  const points = React.useMemo(
+    () => buildPoints(dailyStats, hourlyStats, metricKeys, range),
+    [dailyStats, hourlyStats, metricKeys, range],
+  );
+
+  const toggleMetric = (key: string) => {
     setVisible((prev) => {
       const next = new Set(prev);
       if (next.has(key)) {
@@ -145,18 +175,18 @@ export default function VisitsChart({ stats }: VisitsChartProps) {
   const padTop = 20;
   const padBottom = 30;
 
-  const visibleMetrics = METRICS.filter((m) => visible.has(m.key));
+  const visibleMetrics = metrics.filter((m) => visible.has(m.key));
   const maxVal = Math.max(
     1,
-    ...points.flatMap((p) => visibleMetrics.map((m) => p[m.key])),
+    ...points.flatMap((p) => visibleMetrics.map((m) => Number(p[m.key]) || 0)),
   );
 
   const stepX = points.length > 1 ? (W - padX * 2) / (points.length - 1) : 0;
   const getX = (i: number) => padX + i * stepX;
   const getY = (v: number) => H - padBottom - (v / maxVal) * (H - padTop - padBottom);
 
-  const buildPath = (key: MetricKey) =>
-    points.map((p, i) => `${i === 0 ? "M" : "L"} ${getX(i)},${getY(p[key])}`).join(" ");
+  const buildPath = (key: string) =>
+    points.map((p, i) => `${i === 0 ? "M" : "L"} ${getX(i)},${getY(Number(p[key]) || 0)}`).join(" ");
 
   // برای جلوگیری از شلوغی محور افقی، فقط چند برچسب نمایش داده می‌شود
   const labelStep = Math.max(1, Math.ceil(points.length / 7));
@@ -165,9 +195,9 @@ export default function VisitsChart({ stats }: VisitsChartProps) {
     <div className="p-6 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-5">
       {/* چیپ‌های سری‌ها (مثل سرچ کنسول) */}
       <div className="flex flex-wrap items-center gap-2">
-        {METRICS.map((m) => {
+        {metrics.map((m) => {
           const active = visible.has(m.key);
-          const total = points.reduce((acc, p) => acc + p[m.key], 0);
+          const total = points.reduce((acc, p) => acc + (Number(p[m.key]) || 0), 0);
           return (
             <button
               key={m.key}
@@ -190,7 +220,7 @@ export default function VisitsChart({ stats }: VisitsChartProps) {
       </div>
 
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <h3 className="font-extrabold text-sm text-slate-800">نمودار آمار بازدید کارت</h3>
+        <h3 className="font-extrabold text-sm text-slate-800">{title}</h3>
         <div className="flex gap-1 bg-slate-100 p-1 rounded-xl">
           {RANGES.map((r) => (
             <button
@@ -211,8 +241,8 @@ export default function VisitsChart({ stats }: VisitsChartProps) {
         </div>
       </div>
 
-      {/* نمودار خطی */}
-      <div className="relative">
+      {/* نمودار خطی — عمداً LTR تا محور زمان (قدیم←چپ, امروز←راست) برعکس نشود */}
+      <div className="relative" dir="ltr">
         <svg
           viewBox={`0 0 ${W} ${H}`}
           className="w-full h-[260px] overflow-visible"
@@ -264,7 +294,7 @@ export default function VisitsChart({ stats }: VisitsChartProps) {
               <circle
                 key={m.key}
                 cx={getX(hoverIndex)}
-                cy={getY(points[hoverIndex][m.key])}
+                cy={getY(Number(points[hoverIndex][m.key]) || 0)}
                 r={4}
                 fill="#fff"
                 stroke={m.color}
@@ -290,6 +320,7 @@ export default function VisitsChart({ stats }: VisitsChartProps) {
         {hoverIndex !== null && (
           <div
             className="absolute top-0 bg-slate-900 text-white rounded-xl shadow-xl p-3 text-[11px] pointer-events-none z-20 min-w-[170px]"
+            dir="rtl"
             style={{
               left: `${(getX(hoverIndex) / W) * 100}%`,
               transform: "translate(-50%, calc(-100% - 8px))",
@@ -306,7 +337,7 @@ export default function VisitsChart({ stats }: VisitsChartProps) {
                     {m.label}
                   </span>
                   <span className="font-mono font-bold">
-                    {points[hoverIndex][m.key].toLocaleString("en-US")}
+                    {(Number(points[hoverIndex][m.key]) || 0).toLocaleString("en-US")}
                   </span>
                 </div>
               ))}
