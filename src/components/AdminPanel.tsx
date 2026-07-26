@@ -26,11 +26,16 @@ import {
   CheckCircle,
   Info,
   UploadCloud,
+  Search,
+  Paperclip,
+  Crown,
+  X,
 } from "lucide-react";
 import { User, Ticket, GlobalAnnouncement } from "../types";
 import { apiFetch, setAuthToken } from "../utils/api";
 import QRCode from "qrcode";
 import { Trash2 } from "lucide-react";
+import VisitsChart from "./dashboard-tabs/VisitsChart";
 
 // const fetch = apiFetch;
 
@@ -68,6 +73,9 @@ export default function AdminPanel({
     totalCustomers: 0,
     cardsWithQr: 0,
     totalVisits: 0,
+    proUsersCount: 0,
+    dailyStats: {} as Record<string, { visits: number; scans: number; linkOpens: number; buttonClicks: number }>,
+    hourlyStats: {} as Record<string, { visits: number; scans: number; linkOpens: number; buttonClicks: number }>,
   });
   //serch user
   const [userSearch, setUserSearch] = useState("");
@@ -106,6 +114,34 @@ const filteredUsers = usersList.filter((u) => {
   // Chat window
   const [activeTicket, setActiveTicket] = useState<Ticket | null>(null);
   const [adminResponse, setAdminResponse] = useState("");
+  const [chatAttachmentUploading, setChatAttachmentUploading] = useState(false);
+  const chatFileInputRef = useRef<HTMLInputElement>(null);
+
+  // شروع تیکت جدید توسط ادمین برای یک کاربر مشخص (جستجو با نام‌کاربری/ایمیل)
+  const [showNewTicketComposer, setShowNewTicketComposer] = useState(false);
+  const [newTicketSearch, setNewTicketSearch] = useState("");
+  const [newTicketTargetUsername, setNewTicketTargetUsername] = useState("");
+  const [newTicketTitle, setNewTicketTitle] = useState("");
+  const [newTicketMessage, setNewTicketMessage] = useState("");
+  const [newTicketLoading, setNewTicketLoading] = useState(false);
+
+  // زمان آخرین فعالیت یک تیکت (برای مرتب‌سازی مثل پیام‌رسان‌ها)
+  const getLastActivityTime = (t: Ticket) => {
+    const raw = t.lastMessageAt || t.messages?.[t.messages.length - 1]?.ts || t.createdAt;
+    const time = new Date(raw as any).getTime();
+    return Number.isNaN(time) ? 0 : time;
+  };
+
+  // آیا این تیکت برای ادمین خوانده‌نشده است؟ (آخرین پیام از طرف کاربر و بعد از آخرین بازدید ادمین بوده)
+  const isTicketUnread = (t: Ticket) => {
+    if (t.status === "ended") return false;
+    const lastMsg = t.messages?.[t.messages.length - 1];
+    if (!lastMsg || lastMsg.sender !== "user") return false;
+    if (!t.adminLastReadAt) return true;
+    return getLastActivityTime(t) > new Date(t.adminLastReadAt).getTime();
+  };
+
+  const sortedTickets = ticketsList.slice().sort((a, b) => getLastActivityTime(b) - getLastActivityTime(a));
 
   // Announcements inputs
   const [annTitle, setAnnTitle] = useState("");
@@ -527,6 +563,93 @@ const filteredUsers = usersList.filter((u) => {
     }
   };
 
+  // آپلود و ارسال عکس داخل تیکت — فقط ادمین می‌تواند این کار را انجام دهد
+  const handleSendChatAttachment = async (file: File) => {
+    if (!activeTicket) return;
+    setChatAttachmentUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("image", file);
+      const uploadRes = await apiFetch("/api/admin/upload", {
+        method: "POST",
+        body: formData,
+      });
+      const uploadData = await uploadRes.json();
+      if (!uploadRes.ok || !uploadData.url) {
+        alert(uploadData.message || "خطا در بارگذاری فایل.");
+        return;
+      }
+
+      const res = await apiFetch(
+        `/api/user/${activeTicket.username}/tickets/${activeTicket.id}/messages`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: "🖼️ تصویر ضمیمه", attachment: uploadData.url }),
+        },
+      );
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.message || "خطا در ارسال پیام.");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("خطای اتصال به سرور.");
+    } finally {
+      setChatAttachmentUploading(false);
+      if (chatFileInputRef.current) chatFileInputRef.current.value = "";
+    }
+  };
+
+  // انتخاب تیکت از لیست: علامت‌گذاری فوری به‌عنوان خوانده‌شده برای ادمین
+  const handleSelectTicket = (t: Ticket) => {
+    setActiveTicket(t);
+    if (isTicketUnread(t)) {
+      const nowIso = new Date().toISOString();
+      setTicketsList((prev) =>
+        prev.map((x) => (x.id === t.id ? { ...x, adminLastReadAt: nowIso } : x)),
+      );
+      apiFetch(`/api/admin/tickets/${t.id}/read`, { method: "POST" }).catch(() => {});
+    }
+  };
+
+  // شروع تیکت جدید برای یک کاربر مشخص (جستجوی نام‌کاربری/ایمیل)
+  const handleStartNewTicketForUser = async () => {
+    if (!newTicketTargetUsername || !newTicketTitle || !newTicketMessage) {
+      alert("لطفا کاربر، عنوان و متن پیام را وارد کنید.");
+      return;
+    }
+    setNewTicketLoading(true);
+    try {
+      const res = await apiFetch("/api/admin/tickets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: newTicketTargetUsername,
+          title: newTicketTitle,
+          message: newTicketMessage,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ticket) {
+        setTicketsList((prev) => [data.ticket, ...prev]);
+        setActiveTicket(data.ticket);
+        setShowNewTicketComposer(false);
+        setNewTicketSearch("");
+        setNewTicketTargetUsername("");
+        setNewTicketTitle("");
+        setNewTicketMessage("");
+      } else {
+        alert(data.message || "خطا در ایجاد تیکت.");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("خطای اتصال به سرور.");
+    } finally {
+      setNewTicketLoading(false);
+    }
+  };
+
   const handleUpdateTicketStatus = async (
     ticketId: string,
     status: "read" | "under_review" | "ended",
@@ -872,7 +995,7 @@ const filteredUsers = usersList.filter((u) => {
             </div>
 
             {/* Stats list */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
               <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-between">
                 <div>
                   <span className="text-xs text-slate-400 block font-medium">
@@ -914,10 +1037,37 @@ const filteredUsers = usersList.filter((u) => {
                   <ExternalLink className="w-6 h-6" />
                 </div>
               </div>
+
+              <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-between">
+                <div>
+                  <span className="text-xs text-slate-400 block font-medium">
+                    کاربران دارای اشتراک پرو :
+                  </span>
+                  <span className="text-2xl font-black text-white font-mono mt-1.5 block">
+                    {deskStats.proUsersCount} کاربر
+                  </span>
+                </div>
+                <div className="p-3 rounded-xl bg-amber-500/10 text-amber-400">
+                  <Crown className="w-6 h-6" />
+                </div>
+              </div>
             </div>
 
+            {/* نمودار کلی آمار بازدید سایت (مثل نمودار جدید پنل کاربر) */}
+            <VisitsChart
+              stats={{
+                totalVisits: deskStats.totalVisits,
+                scans: 0,
+                linkOpens: 0,
+                buttonClicks: 0,
+                dailyVisits: {},
+                dailyStats: deskStats.dailyStats,
+                hourlyStats: deskStats.hourlyStats,
+              }}
+            />
+
             {/* Quick alert notifications sections */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 pt-4">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 pt-4">
               {/* Ticket warnings Inbox */}
               <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-4">
                 <span className="text-xs font-bold text-slate-300 block">
@@ -930,26 +1080,29 @@ const filteredUsers = usersList.filter((u) => {
                   </p>
                 ) : (
                   <div className="space-y-2.5 max-h-[220px] overflow-y-auto">
-                    {ticketsList
+                    {sortedTickets
                       .filter((t) => t.status !== "ended")
-                      .slice()
-                      .sort((a, b) => b.id.localeCompare(a.id))
                       .map((t) => (
                         <div
                           key={t.id}
                           className="p-3 rounded-xl bg-slate-950 border border-slate-850 flex items-center justify-between text-xs"
                         >
-                          <div>
-                            <h4 className="font-bold text-slate-200">
-                              {t.title}
-                            </h4>
-                            <span className="text-[10px] text-slate-500">
-                              کاربر: {t.username}
-                            </span>
+                          <div className="flex items-center gap-2">
+                            {isTicketUnread(t) && (
+                              <span className="w-2 h-2 rounded-full bg-indigo-500 shrink-0" />
+                            )}
+                            <div>
+                              <h4 className="font-bold text-slate-200">
+                                {t.title}
+                              </h4>
+                              <span className="text-[10px] text-slate-500">
+                                کاربر: {t.username}
+                              </span>
+                            </div>
                           </div>
                           <button
                             onClick={() => {
-                              setActiveTicket(t);
+                              handleSelectTicket(t);
                               handleTabChange("tickets");
                             }}
                             className="py-1 px-3 bg-indigo-600 text-white rounded text-[10px] font-bold"
@@ -997,6 +1150,45 @@ const filteredUsers = usersList.filter((u) => {
                             className="py-1 px-3 bg-emerald-600 text-white rounded text-[10px] font-bold"
                           >
                             آپلود کیوآرکد
+                          </button>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Card-to-card pending requests inbox */}
+              <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-4">
+                <span className="text-xs font-bold text-slate-300 block">
+                  درخواست‌های پرداخت کارت‌به‌کارت در انتظار بررسی :
+                </span>
+                {subscriptionPurchases.filter((p) => p.payment_status === "pending")
+                  .length === 0 ? (
+                  <p className="text-xs text-slate-500 py-4">
+                    درخواست کارت‌به‌کارتی در صف بررسی وجود ندارد. ✅
+                  </p>
+                ) : (
+                  <div className="space-y-2.5 max-h-[220px] overflow-y-auto">
+                    {subscriptionPurchases
+                      .filter((p) => p.payment_status === "pending")
+                      .map((p) => (
+                        <div
+                          key={p.id}
+                          className="p-3 rounded-xl bg-slate-950 border border-slate-850 flex items-center justify-between text-xs"
+                        >
+                          <div>
+                            <h4 className="font-bold text-slate-200">
+                              {p.full_name || p.username}
+                            </h4>
+                            <span className="text-[10px] text-slate-500 font-mono">
+                              پلن: {p.plan} - {p.amount ? `${p.amount.toLocaleString()} تومان` : ""}
+                            </span>
+                          </div>
+                          <button
+                            onClick={() => handleTabChange("subscriptions")}
+                            className="py-1 px-3 bg-purple-600 text-white rounded text-[10px] font-bold"
+                          >
+                            بررسی رسید
                           </button>
                         </div>
                       ))}
@@ -1363,22 +1555,28 @@ const filteredUsers = usersList.filter((u) => {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
               {/* Tickets list */}
               <div className="lg:col-span-1 space-y-3">
-                <span className="text-xs font-bold text-slate-300 block">
-                  صندوق تیکت ها :
-                </span>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-300 block">
+                    صندوق تیکت ها :
+                  </span>
+                  <button
+                    onClick={() => setShowNewTicketComposer(true)}
+                    className="flex items-center gap-1 py-1.5 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold transition"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    تیکت جدید برای کاربر
+                  </button>
+                </div>
                 {ticketsList.length === 0 ? (
                   <p className="text-xs text-slate-500 text-center py-8">
                     تیکتی یافت نشد.
                   </p>
                 ) : (
                   <div className="space-y-2 max-h-[450px] overflow-y-auto pr-1">
-                    {ticketsList
-                      .slice()
-                      .sort((a, b) => b.id.localeCompare(a.id))
-                      .map((t) => (
+                    {sortedTickets.map((t) => (
                         <button
                           key={t.id}
-                          onClick={() => setActiveTicket(t)}
+                          onClick={() => handleSelectTicket(t)}
                           className={`w-full p-4 rounded-xl border text-right transition flex flex-col justify-between ${
                             activeTicket?.id === t.id
                               ? "bg-indigo-600/10 border-indigo-500/40 text-white"
@@ -1386,7 +1584,10 @@ const filteredUsers = usersList.filter((u) => {
                           }`}
                         >
                           <div className="flex items-center justify-between w-full">
-                            <span className="font-extrabold text-xs text-slate-100">
+                            <span className="flex items-center gap-1.5 font-extrabold text-xs text-slate-100">
+                              {isTicketUnread(t) && (
+                                <span className="w-2 h-2 rounded-full bg-indigo-500 shrink-0" />
+                              )}
                               {t.title}
                             </span>
                             <span
@@ -1488,6 +1689,15 @@ const filteredUsers = usersList.filter((u) => {
                                 : "bg-slate-950 text-slate-100 rounded-bl-none border border-slate-850"
                             }`}
                           >
+                            {m.attachment && (
+                              <a href={m.attachment} target="_blank" rel="noreferrer">
+                                <img
+                                  src={m.attachment}
+                                  alt="پیوست"
+                                  className="rounded-xl max-w-[220px] max-h-[220px] object-cover mb-2 border border-white/10"
+                                />
+                              </a>
+                            )}
                             <p>{m.message}</p>
                             <span className="block text-[8px] opacity-65 mt-1.5 font-mono text-left">
                               {m.createdAt}
@@ -1504,6 +1714,30 @@ const filteredUsers = usersList.filter((u) => {
                         onSubmit={handleAdminSendChat}
                         className="flex gap-2 border-t border-slate-800 pt-3 mt-1"
                       >
+                        <input
+                          ref={chatFileInputRef}
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            if (e.target.files && e.target.files[0]) {
+                              handleSendChatAttachment(e.target.files[0]);
+                            }
+                          }}
+                        />
+                        <button
+                          type="button"
+                          disabled={chatAttachmentUploading}
+                          onClick={() => chatFileInputRef.current?.click()}
+                          title="ارسال عکس (فقط ادمین)"
+                          className="py-3 px-3.5 bg-slate-950 border border-slate-850 text-slate-300 hover:text-white rounded-xl transition disabled:opacity-50"
+                        >
+                          {chatAttachmentUploading ? (
+                            <RefreshCw className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Paperclip className="w-4 h-4" />
+                          )}
+                        </button>
                         <input
                           type="text"
                           placeholder="پیام پاسخ خود را برای مجمع به کاربر بنویسید..."
@@ -2515,6 +2749,127 @@ const filteredUsers = usersList.filter((u) => {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* 5. NEW TICKET COMPOSER — شروع تیکت جدید توسط ادمین برای یک کاربر مشخص */}
+      {showNewTicketComposer && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-6 text-right space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="font-extrabold text-base text-white">
+                تیکت جدید برای کاربر
+              </h3>
+              <button
+                onClick={() => setShowNewTicketComposer(false)}
+                className="text-slate-500 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-300">
+                جستجوی کاربر (نام‌کاربری یا ایمیل) :
+              </label>
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-500 absolute right-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={newTicketSearch}
+                  onChange={(e) => {
+                    setNewTicketSearch(e.target.value);
+                    setNewTicketTargetUsername("");
+                  }}
+                  placeholder="مثلا: ali_reza یا ali@email.com"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2.5 pr-8 pl-3 text-xs text-slate-200 outline-none"
+                />
+              </div>
+
+              {newTicketSearch.trim() && !newTicketTargetUsername && (
+                <div className="max-h-40 overflow-y-auto border border-slate-800 rounded-xl divide-y divide-slate-800">
+                  {usersList
+                    .filter((u) => {
+                      const s = newTicketSearch.toLowerCase().trim();
+                      return (
+                        u.username?.toLowerCase().includes(s) ||
+                        u.email?.toLowerCase().includes(s)
+                      );
+                    })
+                    .slice(0, 6)
+                    .map((u) => (
+                      <button
+                        key={u.username}
+                        type="button"
+                        onClick={() => {
+                          setNewTicketTargetUsername(u.username);
+                          setNewTicketSearch(`${u.fullName} (${u.username})`);
+                        }}
+                        className="w-full text-right px-3 py-2 text-xs text-slate-300 hover:bg-slate-800 transition"
+                      >
+                        {u.fullName}{" "}
+                        <span className="text-slate-500 font-mono">({u.username})</span>
+                      </button>
+                    ))}
+                  {usersList.filter((u) => {
+                    const s = newTicketSearch.toLowerCase().trim();
+                    return (
+                      u.username?.toLowerCase().includes(s) ||
+                      u.email?.toLowerCase().includes(s)
+                    );
+                  }).length === 0 && (
+                    <p className="px-3 py-2 text-[11px] text-slate-500">کاربری یافت نشد.</p>
+                  )}
+                </div>
+              )}
+
+              {newTicketTargetUsername && (
+                <p className="text-[11px] text-emerald-400 font-bold">
+                  کاربر انتخاب‌شده: {newTicketTargetUsername}
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-300">عنوان تیکت :</label>
+              <input
+                type="text"
+                value={newTicketTitle}
+                onChange={(e) => setNewTicketTitle(e.target.value)}
+                placeholder="مثلا: اطلاعیه بروزرسانی حساب"
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2.5 px-3 text-xs text-slate-200 outline-none"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-300">متن پیام :</label>
+              <textarea
+                value={newTicketMessage}
+                onChange={(e) => setNewTicketMessage(e.target.value)}
+                rows={4}
+                placeholder="پیام خود را بنویسید..."
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2.5 px-3 text-xs text-slate-200 outline-none resize-none"
+              />
+            </div>
+
+            <div className="flex gap-2 justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => setShowNewTicketComposer(false)}
+                className="py-2.5 px-4 bg-slate-800 text-slate-400 text-xs font-bold rounded-xl hover:text-white transition"
+              >
+                انصراف
+              </button>
+              <button
+                type="button"
+                disabled={newTicketLoading || !newTicketTargetUsername}
+                onClick={handleStartNewTicketForUser}
+                className="py-2.5 px-5 bg-indigo-600 text-white text-xs font-bold rounded-xl hover:brightness-110 transition disabled:opacity-50"
+              >
+                {newTicketLoading ? "در حال ارسال..." : "ارسال تیکت"}
+              </button>
+            </div>
           </div>
         </div>
       )}

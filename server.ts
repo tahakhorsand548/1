@@ -161,6 +161,15 @@ CREATE TABLE IF NOT EXISTS subscription_features (
 try { db.exec(`ALTER TABLE subscription_purchases ADD COLUMN start_date TEXT NOT NULL DEFAULT ''`); } catch {}
 try { db.exec(`ALTER TABLE subscription_purchases ADD COLUMN expire_date TEXT NOT NULL DEFAULT ''`); } catch {}
 
+try { db.exec(`ALTER TABLE tickets ADD COLUMN last_message_at TEXT NOT NULL DEFAULT ''`); } catch {}
+try { db.exec(`ALTER TABLE tickets ADD COLUMN admin_last_read_at TEXT NOT NULL DEFAULT ''`); } catch {}
+
+// برای تیکت‌های قدیمی‌ای که last_message_at خالی مانده (قبل از این مهاجرت)،
+// created_at را به‌عنوان جایگزین در نظر می‌گیریم تا مرتب‌سازی خراب نشود.
+try {
+  db.exec(`UPDATE tickets SET last_message_at = created_at WHERE last_message_at = ''`);
+} catch {}
+
 // ─── نگاشت پلن‌های قابل فعال‌سازی دستی توسط ادمین ────────────────────────────
 // کدهای «۷ روزه / ۱ ماهه / ۳ ماهه / ۶ ماهه / ۱ ساله» که ادمین می‌تواند مستقیماً
 // و بدون نیاز به رسید کارت‌به‌کارت، برای هر کاربری فعال کند.
@@ -433,6 +442,14 @@ function notifyAdmin(payload: object) {
   const msg = JSON.stringify(payload);
   wsClients.forEach(c => {
     if (c.role === "admin" && c.ws.readyState === WebSocket.OPEN) c.ws.send(msg);
+  });
+}
+function notifyUser(username: string, payload: object) {
+  const msg = JSON.stringify(payload);
+  wsClients.forEach(c => {
+    if (c.role === "user" && c.username.toLowerCase() === username.toLowerCase() && c.ws.readyState === WebSocket.OPEN) {
+      c.ws.send(msg);
+    }
   });
 }
 
@@ -765,9 +782,16 @@ app.post("/api/user/:username/qr-request", verifyToken, (req: any, res) => {
 app.get("/api/user/:username/tickets", verifyToken, (req: any, res) => {
   if (req.username !== req.params.username && req.username !== "admin")
     return res.status(403).json({ message: "دسترسی غیرمجاز." });
-  const rows = db.prepare("SELECT * FROM tickets WHERE LOWER(username)=LOWER(?) ORDER BY created_at DESC")
+  const rows = db.prepare("SELECT * FROM tickets WHERE LOWER(username)=LOWER(?) ORDER BY last_message_at DESC")
     .all(req.params.username) as any[];
-  return res.json(rows.map(t => ({ ...t, userFullName: t.user_fullname, createdAt: t.created_at, messages: JSON.parse(t.messages) })));
+  return res.json(rows.map(t => ({
+    ...t,
+    userFullName: t.user_fullname,
+    createdAt: t.created_at,
+    lastMessageAt: t.last_message_at,
+    adminLastReadAt: t.admin_last_read_at,
+    messages: JSON.parse(t.messages),
+  })));
 });
 
 app.post("/api/user/:username/tickets", verifyToken, (req: any, res) => {
@@ -797,6 +821,7 @@ messages: JSON.stringify([
     id: "msg-1",
     sender: "user",
     message: description,
+    ts: now.getTime(),
     createdAt: now.toLocaleTimeString("fa-IR", {
       hour: "2-digit",
       minute: "2-digit",
@@ -805,41 +830,116 @@ messages: JSON.stringify([
   }
 ]),
   };
-  db.prepare("INSERT INTO tickets (id,username,user_fullname,title,description,status,created_at,messages) VALUES (?,?,?,?,?,?,?,?)")
+  db.prepare("INSERT INTO tickets (id,username,user_fullname,title,description,status,created_at,messages,last_message_at,admin_last_read_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
     .run(newTicket.id, newTicket.username, newTicket.user_fullname, newTicket.title,
-      newTicket.description, newTicket.status, newTicket.created_at, newTicket.messages);
-  const ticket = { ...newTicket, userFullName: newTicket.user_fullname, createdAt: newTicket.created_at, messages: JSON.parse(newTicket.messages) };
+      newTicket.description, newTicket.status, newTicket.created_at, newTicket.messages,
+      now.toISOString(), "");
+  const ticket = { ...newTicket, userFullName: newTicket.user_fullname, createdAt: newTicket.created_at, messages: JSON.parse(newTicket.messages), lastMessageAt: now.toISOString(), adminLastReadAt: "" };
   notifyAdmin({ type: "new_ticket", ticket });
   return res.json({ message: "تیکت ثبت شد.", ticket });
 });
 
 app.post("/api/user/:username/tickets/:ticketId/messages", verifyToken, (req: any, res) => {
   const { username, ticketId } = req.params;
-  const { message } = req.body;
+  const { message, attachment } = req.body;
   if (req.username !== username && req.username !== "admin")
     return res.status(403).json({ message: "دسترسی غیرمجاز." });
   const ticket = db.prepare("SELECT * FROM tickets WHERE id=?").get(ticketId) as any;
   if (!ticket) return res.status(404).json({ message: "تیکت یافت نشد." });
   if (ticket.status === "ended") return res.status(400).json({ message: "این تیکت بسته شده." });
 
+  const isAdmin = req.username === "admin";
   const messages = JSON.parse(ticket.messages);
-const newMsg = {
+  const now = new Date();
+const newMsg: any = {
   id: "msg-" + Date.now(),
-  sender: req.username === "admin" ? "support" : "user",
+  sender: isAdmin ? "support" : "user",
   message,
-  createdAt: new Date().toLocaleTimeString("fa-IR", {
+  ts: now.getTime(),
+  createdAt: now.toLocaleTimeString("fa-IR", {
     hour: "2-digit",
     minute: "2-digit",
     timeZone: "Asia/Tehran"
   })
 };
-  messages.push(newMsg);
-  const newStatus = req.username !== "admin" ? "under_review" : ticket.status;
-  db.prepare("UPDATE tickets SET messages=?, status=? WHERE id=?").run(JSON.stringify(messages), newStatus, ticketId);
+  // ارسال فایل/عکس در تیکت فقط برای ادمین مجاز است
+  if (attachment && isAdmin) newMsg.attachment = attachment;
 
-  broadcastToTicket(ticketId, { type: "new_message", ticketId, message: newMsg, newStatus });
-  notifyAdmin({ type: "ticket_updated", ticketId, username, newStatus });
+  messages.push(newMsg);
+  const newStatus = !isAdmin ? "under_review" : ticket.status;
+  const nowIso = now.toISOString();
+  const adminLastReadAt = isAdmin ? nowIso : ticket.admin_last_read_at;
+
+  db.prepare("UPDATE tickets SET messages=?, status=?, last_message_at=?, admin_last_read_at=? WHERE id=?")
+    .run(JSON.stringify(messages), newStatus, nowIso, adminLastReadAt, ticketId);
+
+  broadcastToTicket(ticketId, { type: "new_message", ticketId, message: newMsg, newStatus, lastMessageAt: nowIso });
+  notifyAdmin({ type: "ticket_updated", ticketId, username, newStatus, lastMessageAt: nowIso });
+  if (isAdmin) notifyUser(ticket.username, { type: "new_message", ticketId, message: newMsg, newStatus, lastMessageAt: nowIso });
   return res.json(newMsg);
+});
+
+// ─── علامت‌گذاری تیکت به‌عنوان خوانده‌شده توسط ادمین ──────────────────────────
+app.post("/api/admin/tickets/:ticketId/read", verifyAdmin, (req, res) => {
+  const nowIso = new Date().toISOString();
+  const result = db.prepare("UPDATE tickets SET admin_last_read_at=? WHERE id=?").run(nowIso, req.params.ticketId);
+  if (result.changes === 0) return res.status(404).json({ message: "تیکت یافت نشد." });
+  return res.json({ success: true, adminLastReadAt: nowIso });
+});
+
+// ─── شروع تیکت جدید توسط ادمین برای یک کاربر مشخص ────────────────────────────
+app.post("/api/admin/tickets", verifyAdmin, (req, res) => {
+  const { username, title, message } = req.body;
+  if (!username || !title || !message)
+    return res.status(400).json({ message: "کاربر، عنوان و متن پیام الزامی است." });
+
+  const user = db.prepare("SELECT full_name FROM users WHERE LOWER(username)=LOWER(?)").get(username) as any;
+  if (!user) return res.status(404).json({ message: "کاربر یافت نشد." });
+
+  const now = new Date();
+  const createdAtStr =
+    now.toLocaleDateString("fa-IR", { timeZone: "Asia/Tehran" }) +
+    " - " +
+    now.toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tehran" });
+
+  const newTicket = {
+    id: "ticket-" + Date.now(),
+    username,
+    user_fullname: user.full_name || "کاربر",
+    title,
+    description: message,
+    status: "under_review",
+    created_at: createdAtStr,
+    messages: JSON.stringify([
+      {
+        id: "msg-1",
+        sender: "support",
+        message,
+        ts: now.getTime(),
+        createdAt: now.toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tehran" }),
+      },
+    ]),
+  };
+
+  db.prepare(
+    "INSERT INTO tickets (id,username,user_fullname,title,description,status,created_at,messages,last_message_at,admin_last_read_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+  ).run(
+    newTicket.id, newTicket.username, newTicket.user_fullname, newTicket.title,
+    newTicket.description, newTicket.status, newTicket.created_at, newTicket.messages,
+    now.toISOString(), now.toISOString(), // چون ادمین خودش این را نوشته، از نظر او خوانده‌شده است
+  );
+
+  const ticket = {
+    ...newTicket,
+    userFullName: newTicket.user_fullname,
+    createdAt: newTicket.created_at,
+    messages: JSON.parse(newTicket.messages),
+    lastMessageAt: now.toISOString(),
+    adminLastReadAt: now.toISOString(),
+  };
+
+  notifyUser(username, { type: "new_ticket", ticket });
+  return res.json({ message: "تیکت با موفقیت برای کاربر ثبت شد.", ticket });
 });
 
 // ─── Admin Routes ─────────────────────────────────────────────────────────────
@@ -848,7 +948,38 @@ app.get("/api/admin/stats", verifyAdmin, (req, res) => {
   const cardsWithQr    = (db.prepare("SELECT COUNT(*) as c FROM users WHERE qr_request_status='approved'").get() as any).c;
   const rows           = db.prepare("SELECT card_data FROM users").all() as any[];
   const totalVisits    = rows.reduce((acc, r) => acc + (JSON.parse(r.card_data)?.stats?.totalVisits || 0), 0);
-  return res.json({ totalCustomers, cardsWithQr, totalVisits });
+
+  // تعداد کاربران دارای اشتراک پرو فعال و معتبر (منقضی‌نشده)
+  const proUsersCount = (db.prepare(
+    `SELECT COUNT(*) as c FROM subscriptions WHERE status='active' AND expire_date > ? AND LOWER(username) != 'admin'`
+  ).get(new Date().toISOString()) as any).c;
+
+  // تجمیع تاریخچه روزانه/ساعتی همه کاربران، برای نمودار کلی «آمار بازدید سایت» در پیشخوان ادمین
+  const dailyStats: Record<string, { visits: number; scans: number; linkOpens: number; buttonClicks: number }> = {};
+  const hourlyStats: Record<string, { visits: number; scans: number; linkOpens: number; buttonClicks: number }> = {};
+
+  rows.forEach((r) => {
+    let cd: any = {};
+    try { cd = JSON.parse(r.card_data); } catch { return; }
+    const daily = cd?.stats?.dailyStats || {};
+    const hourly = cd?.stats?.hourlyStats || {};
+    Object.entries(daily).forEach(([key, val]: [string, any]) => {
+      if (!dailyStats[key]) dailyStats[key] = { visits: 0, scans: 0, linkOpens: 0, buttonClicks: 0 };
+      dailyStats[key].visits += val.visits || 0;
+      dailyStats[key].scans += val.scans || 0;
+      dailyStats[key].linkOpens += val.linkOpens || 0;
+      dailyStats[key].buttonClicks += val.buttonClicks || 0;
+    });
+    Object.entries(hourly).forEach(([key, val]: [string, any]) => {
+      if (!hourlyStats[key]) hourlyStats[key] = { visits: 0, scans: 0, linkOpens: 0, buttonClicks: 0 };
+      hourlyStats[key].visits += val.visits || 0;
+      hourlyStats[key].scans += val.scans || 0;
+      hourlyStats[key].linkOpens += val.linkOpens || 0;
+      hourlyStats[key].buttonClicks += val.buttonClicks || 0;
+    });
+  });
+
+  return res.json({ totalCustomers, cardsWithQr, totalVisits, proUsersCount, dailyStats, hourlyStats });
 });
 
 app.get("/api/admin/users", verifyAdmin, (req, res) => {
@@ -1156,8 +1287,15 @@ app.post("/api/admin/qr-requests/:username/approve", verifyAdmin, (req, res) => 
 });
 
 app.get("/api/admin/tickets", verifyAdmin, (req, res) => {
-  const rows = db.prepare("SELECT * FROM tickets ORDER BY created_at DESC").all() as any[];
-  return res.json(rows.map(t => ({ ...t, userFullName: t.user_fullname, createdAt: t.created_at, messages: JSON.parse(t.messages) })));
+  const rows = db.prepare("SELECT * FROM tickets ORDER BY last_message_at DESC").all() as any[];
+  return res.json(rows.map(t => ({
+    ...t,
+    userFullName: t.user_fullname,
+    createdAt: t.created_at,
+    lastMessageAt: t.last_message_at,
+    adminLastReadAt: t.admin_last_read_at,
+    messages: JSON.parse(t.messages),
+  })));
 });
 
 app.post("/api/admin/tickets/:ticketId/status", verifyAdmin, (req, res) => {

@@ -100,6 +100,10 @@ export interface TicketMessage {
   sender: 'user' | 'support';
   message: string;
   createdAt: string;
+  /** زمان دقیق پیام به‌صورت epoch ms (برای مرتب‌سازی/محاسبه خوانده‌نشده) */
+  ts?: number;
+  /** آدرس تصویر پیوست‌شده — فقط ادمین می‌تواند این را ارسال کند */
+  attachment?: string;
 }
 
 export interface Ticket {
@@ -111,6 +115,10 @@ export interface Ticket {
   status: 'read' | 'under_review' | 'ended';
   createdAt: string;
   messages: TicketMessage[];
+  /** زمان آخرین پیام (ISO) — مبنای مرتب‌سازی تیکت‌ها مثل یک پیام‌رسان */
+  lastMessageAt?: string;
+  /** آخرین باری که ادمین این تیکت را باز/مشاهده کرده (ISO) */
+  adminLastReadAt?: string;
 }
 
 export interface GlobalAnnouncement {

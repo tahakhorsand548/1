@@ -168,6 +168,13 @@ export default function UserDashboard({
         // اسکرول به آخر
         setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
       }
+      // ادمین یک تیکت جدید مستقیماً برای این کاربر باز کرده است
+      if (msg.type === "new_ticket" && msg.ticket && msg.ticket.username === user.username) {
+        setTickets(prev => {
+          if (prev.some(t => t.id === msg.ticket.id)) return prev;
+          return [msg.ticket, ...prev];
+        });
+      }
     },
   });
 
