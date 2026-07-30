@@ -10,9 +10,34 @@ import crypto from "crypto";
 import bcrypt from "bcrypt";
 import { WebSocketServer, WebSocket } from "ws";
 import { createServer as createHttpServer } from "http";
+import Database from "better-sqlite3";
 import multer from "multer";
 import sharp from "sharp";
-import { pool, query, queryOne, execute } from "./db/pool";
+
+// ─── فشرده‌سازی تصاویر ظاهری (لوگو، تصاویر کارت، بنر) ────────────────────────
+// به webp با عرض حداکثر ۱۹۲۰px تبدیل می‌شوند تا حجم دیتا و پهنای‌باند صرفه‌جویی
+// شود. عمداً برای رسیدهای پرداخت استفاده نمی‌شود چون سند مالی هستند و نباید
+// کیفیت/محتوایشان تغییر کند.
+const MAX_IMAGE_WIDTH = 1920;
+const WEBP_QUALITY = 82;
+
+async function compressUploadedImage(filePath: string): Promise<string> {
+  const dir = path.dirname(filePath);
+  const base = path.basename(filePath, path.extname(filePath));
+  const outputPath = path.join(dir, `${base}.webp`);
+
+  await sharp(filePath)
+    .resize({ width: MAX_IMAGE_WIDTH, withoutEnlargement: true })
+    .webp({ quality: WEBP_QUALITY })
+    .toFile(outputPath);
+
+  // اگر مسیر خروجی با ورودی فرق داشت (تغییر فرمت)، فایل اصلی دیگر لازم نیست
+  if (outputPath !== filePath) {
+    try { fs.unlinkSync(filePath); } catch {}
+  }
+
+  return outputPath;
+}
 
 
 
@@ -68,38 +93,119 @@ const receiptUpload = multer({
   limits: { fileSize: 10 * 1024 * 1024 }, // حداکثر 10MB
 });
 
-// ─── فشرده‌سازی تصاویر ظاهری (لوگو، تصاویر کارت، بنر) ────────────────────────
-// به webp با عرض حداکثر ۱۹۲۰px تبدیل می‌شوند تا حجم دیتا و پهنای‌باند صرفه‌جویی
-// شود. عمداً برای رسیدهای پرداخت استفاده نمی‌شود چون سند مالی هستند و نباید
-// کیفیت/محتوایشان تغییر کند.
-const MAX_IMAGE_WIDTH = 1920;
-const WEBP_QUALITY = 82;
+// ─── SQLite ───────────────────────────────────────────────────────────────────
+const db = new Database(path.join(DATA_DIR, "app.db"));
+db.pragma("journal_mode = WAL");
+db.pragma("foreign_keys = ON");
 
-async function compressUploadedImage(filePath: string): Promise<string> {
-  const dir = path.dirname(filePath);
-  const base = path.basename(filePath, path.extname(filePath));
-  const outputPath = path.join(dir, `${base}.webp`);
+db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    username          TEXT PRIMARY KEY,
+    full_name         TEXT NOT NULL,
+    email             TEXT UNIQUE NOT NULL,
+    phone             TEXT UNIQUE NOT NULL,
+    password_hash     TEXT NOT NULL,
+    is_suspended      INTEGER NOT NULL DEFAULT 0,
+    qr_image_url      TEXT NOT NULL DEFAULT '',
+    qr_request_status TEXT NOT NULL DEFAULT 'none',
+    qr_request_time   TEXT NOT NULL DEFAULT '',
+    card_data         TEXT NOT NULL DEFAULT '{}'
+  );
+  CREATE TABLE IF NOT EXISTS tickets (
+    id            TEXT PRIMARY KEY,
+    username      TEXT NOT NULL,
+    user_fullname TEXT NOT NULL,
+    title         TEXT NOT NULL,
+    description   TEXT NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'pending',
+    created_at    TEXT NOT NULL,
+    messages      TEXT NOT NULL DEFAULT '[]',
+    FOREIGN KEY (username) REFERENCES users(username) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS announcements (
+    id          TEXT PRIMARY KEY,
+    title       TEXT NOT NULL,
+    description TEXT NOT NULL,
+    image       TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS banners (
+    id        TEXT PRIMARY KEY,
+    image_url TEXT NOT NULL DEFAULT '',
+    title     TEXT NOT NULL DEFAULT ''
+  );
 
-  await sharp(filePath)
-    .resize({ width: MAX_IMAGE_WIDTH, withoutEnlargement: true })
-    .webp({ quality: WEBP_QUALITY })
-    .toFile(outputPath);
+  -- جدول اشتراک کاربران
+  CREATE TABLE IF NOT EXISTS subscriptions (
+    id              TEXT PRIMARY KEY,
+    username        TEXT NOT NULL UNIQUE,
+    plan            TEXT NOT NULL DEFAULT 'free',
+    status          TEXT NOT NULL DEFAULT 'free',
+    start_date      TEXT NOT NULL DEFAULT '',
+    expire_date     TEXT NOT NULL DEFAULT '',
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    FOREIGN KEY (username) REFERENCES users(username) ON DELETE CASCADE
+  );
 
-  if (outputPath !== filePath) {
-    try { fs.unlinkSync(filePath); } catch {}
-  }
+  -- تاریخچه تمام خریدها و تمدیدها
+  CREATE TABLE IF NOT EXISTS subscription_purchases (
+    id                TEXT PRIMARY KEY,
+    username          TEXT NOT NULL,
+    plan              TEXT NOT NULL,
+    duration_months   INTEGER NOT NULL DEFAULT 0,
+    amount            INTEGER NOT NULL DEFAULT 0,
+    payment_method    TEXT NOT NULL,
+    payment_status    TEXT NOT NULL DEFAULT 'pending',
+    transaction_id    TEXT NOT NULL DEFAULT '',
+    receipt_image     TEXT NOT NULL DEFAULT '',
+    description       TEXT NOT NULL DEFAULT '',
+    created_at        TEXT NOT NULL,
+    approved_at       TEXT NOT NULL DEFAULT '',
+    approved_by       TEXT NOT NULL DEFAULT '',
+    FOREIGN KEY (username) REFERENCES users(username) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS subscription_plans (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  months INTEGER NOT NULL,
+  price INTEGER NOT NULL,
+  is_free INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  sort_order INTEGER NOT NULL DEFAULT 0
+);
 
-  return outputPath;
-}
+CREATE TABLE IF NOT EXISTS subscription_features (
+  id TEXT PRIMARY KEY,
+  plan_id TEXT NOT NULL,
+  feature_key TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  FOREIGN KEY(plan_id) REFERENCES subscription_plans(id) ON DELETE CASCADE
+);
+`);
 
-// ─── PostgreSQL: اجرای schema (idempotent — IF NOT EXISTS همه‌جا هست) ─────────
-async function applySchema() {
-  const schemaPath = path.join(process.cwd(), "db", "schema.sql");
-  const schemaSql = fs.readFileSync(schemaPath, "utf-8");
-  await pool.query(schemaSql);
-}
+// ─── مهاجرت داده (Migration): افزودن بازه اعتبار به تاریخچه خرید/فعال‌سازی ────
+// این دو ستون امکان نمایش «از چه تاریخی تا چه تاریخی فعال بوده» را برای هر
+// رکورد از تاریخچه (چه کارت‌به‌کارت، چه فعال‌سازی مستقیم ادمین) فراهم می‌کنند.
+try { db.exec(`ALTER TABLE subscription_purchases ADD COLUMN start_date TEXT NOT NULL DEFAULT ''`); } catch {}
+try { db.exec(`ALTER TABLE subscription_purchases ADD COLUMN expire_date TEXT NOT NULL DEFAULT ''`); } catch {}
+
+try { db.exec(`ALTER TABLE tickets ADD COLUMN last_message_at TEXT NOT NULL DEFAULT ''`); } catch {}
+try { db.exec(`ALTER TABLE tickets ADD COLUMN admin_last_read_at TEXT NOT NULL DEFAULT ''`); } catch {}
+
+try { db.exec(`ALTER TABLE banners ADD COLUMN link_url TEXT NOT NULL DEFAULT ''`); } catch {}
+try { db.exec(`ALTER TABLE banners ADD COLUMN video_url TEXT NOT NULL DEFAULT ''`); } catch {}
+try { db.exec(`ALTER TABLE users ADD COLUMN qr_approved_at TEXT NOT NULL DEFAULT ''`); } catch {}
+
+// برای تیکت‌های قدیمی‌ای که last_message_at خالی مانده (قبل از این مهاجرت)،
+// created_at را به‌عنوان جایگزین در نظر می‌گیریم تا مرتب‌سازی خراب نشود.
+try {
+  db.exec(`UPDATE tickets SET last_message_at = created_at WHERE last_message_at = ''`);
+} catch {}
 
 // ─── نگاشت پلن‌های قابل فعال‌سازی دستی توسط ادمین ────────────────────────────
+// کدهای «۷ روزه / ۱ ماهه / ۳ ماهه / ۶ ماهه / ۱ ساله» که ادمین می‌تواند مستقیماً
+// و بدون نیاز به رسید کارت‌به‌کارت، برای هر کاربری فعال کند.
 const MANUAL_PLAN_LABELS: Record<string, string> = {
   "7d": "۷ روزه",
   "1m": "۱ ماهه",
@@ -141,11 +247,11 @@ function addPlanDuration(base: Date, planCode: string): Date {
 
 // اگر کاربر هم‌اکنون اشتراک فعال و منقضی‌نشده‌ای دارد، پلن جدید باید به انتهای
 // همان بازه اضافه شود (جمع‌شونده)، نه اینکه از امروز محاسبه و جایگزین شود.
-async function getStackedBaseDate(username: string): Promise<Date> {
-  const current = await queryOne<any>(
-    `SELECT expire_date, status FROM subscriptions WHERE username=$1`,
-    [username],
-  );
+// مثال: کاربری با ۷ روز باقیمانده، پلن ۳ ماهه می‌خرد → باید ۳ ماه + ۷ روز شود.
+function getStackedBaseDate(username: string): Date {
+  const current = db
+    .prepare(`SELECT expire_date, status FROM subscriptions WHERE username=?`)
+    .get(username) as any;
 
   const now = new Date();
 
@@ -206,6 +312,23 @@ function isoHourKey(date: Date): string {
   return date.toISOString().slice(0, 13); // YYYY-MM-DDTHH
 }
 
+// یک واحد از تاریخچه روزانه/ساعتی را برای یک متریک مشخص، ۱ واحد افزایش می‌دهد
+// و طول تاریخچه را برای جلوگیری از رشد بی‌رویه دیتابیس محدود می‌کند.
+function bumpStatBucket(
+  map: Record<string, { visits: number; scans: number; linkOpens: number; buttonClicks: number }>,
+  key: string,
+  metric: "visits" | "scans" | "linkOpens" | "buttonClicks",
+  maxEntries: number,
+) {
+  if (!map[key]) map[key] = { visits: 0, scans: 0, linkOpens: 0, buttonClicks: 0 };
+  map[key][metric] = (map[key][metric] || 0) + 1;
+
+  const keys = Object.keys(map).sort();
+  if (keys.length > maxEntries) {
+    keys.slice(0, keys.length - maxEntries).forEach((k) => delete map[k]);
+  }
+}
+
 // ─── داده پیش‌فرض کارت ───────────────────────────────────────────────────────
 function createDefaultCardData(brandName: string) {
   return {
@@ -227,12 +350,12 @@ function createDefaultCardData(brandName: string) {
     stats:  { totalVisits: 0, scans: 0, linkOpens: 0, buttonClicks: 0, dailyVisits: {}, dailyStats: {}, hourlyStats: {} },
   };
 }
-
 // ─── Seed داده اولیه ──────────────────────────────────────────────────────────
 // اطلاعات ادمین دیگر در کد هاردکد نیست و فقط از متغیرهای محیطی خوانده می‌شود.
+// این مقادیر فقط برای اولین اجرای سرور (وقتی هنوز کاربر admin ساخته نشده)
+// استفاده می‌شوند.
 async function seedAdminUser() {
-  const existing = await queryOne(`SELECT 1 FROM users WHERE username = 'admin'`);
-  if (existing) return;
+  if (db.prepare("SELECT 1 FROM users WHERE username = 'admin'").get()) return;
 
   const adminUsername = process.env.ADMIN_USERNAME;
   const adminFullName = process.env.ADMIN_FULL_NAME;
@@ -248,169 +371,120 @@ async function seedAdminUser() {
     process.exit(1);
   }
 
-  await execute(
-    `INSERT INTO users (username,full_name,email,phone,password_hash,card_data)
-     VALUES ($1,$2,$3,$4,$5,$6)`,
-    [
+  db.prepare(`INSERT INTO users (username,full_name,email,phone,password_hash,card_data)
+    VALUES (?,?,?,?,?,?)`)
+    .run(
       adminUsername,
       adminFullName || "مدیر کل پلتفرم",
       adminEmail,
       adminPhone || "",
       await hashPassword(adminPassword),
-      JSON.stringify(createDefaultCardData("کارت نمونه ادمین")),
-    ],
-  );
+      JSON.stringify(createDefaultCardData("کارت نمونه ادمین"))
+    );
 }
+// این تابع باید قبل از پذیرش هر درخواستی تمام شده باشد (پایین‌تر await می‌شود)
+const insertBanner = db.prepare("INSERT OR IGNORE INTO banners (id,image_url,title) VALUES (?,?,?)");
+insertBanner.run("banner1","https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&q=80","کارت ویزیت دیجیتال رایگان خود را بسازید");
+insertBanner.run("banner2","https://images.unsplash.com/photo-1620121692029-d088224ddc74?w=800&q=80","چاپ کارت فیزیکی با برچسب هوشمند NFC");
+insertBanner.run("banner3","https://images.unsplash.com/photo-1600132806370-bf17e65e942f?w=800&q=80","کسب و کار خود را در نقشه گوگل ثبت کنید");
 
-async function seedInitialData() {
-  // بنرهای پیش‌فرض
-  const defaultBanners: [string, string, string][] = [
-    ["banner1", "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&q=80", "کارت ویزیت دیجیتال رایگان خود را بسازید"],
-    ["banner2", "https://images.unsplash.com/photo-1620121692029-d088224ddc74?w=800&q=80", "چاپ کارت فیزیکی با برچسب هوشمند NFC"],
-    ["banner3", "https://images.unsplash.com/photo-1600132806370-bf17e65e942f?w=800&q=80", "کسب و کار خود را در نقشه گوگل ثبت کنید"],
-  ];
-  for (const [id, imageUrl, title] of defaultBanners) {
-    await execute(
-      `INSERT INTO banners (id,image_url,title) VALUES ($1,$2,$3) ON CONFLICT (id) DO NOTHING`,
-      [id, imageUrl, title],
-    );
-  }
+const insertPlan = db.prepare(`
+INSERT OR IGNORE INTO subscription_plans
+(id,title,months,price,is_free,is_active,sort_order)
+VALUES (?,?,?,?,?,?,?)
+`);
 
-  // پلن‌های پیش‌فرض
-  const defaultPlans: [string, string, number, number, boolean, boolean, number][] = [
-    ["free", "رایگان", 0, 0, true, true, 1],
-    ["7d", "۷ روزه", 0, 0, false, true, 2],
-    ["1m", "یک ماهه", 1, 0, false, true, 3],
-    ["3m", "سه ماهه", 3, 0, false, true, 4],
-    ["6m", "شش ماهه", 6, 0, false, true, 5],
-    ["1y", "یک ساله", 12, 0, false, true, 6],
-  ];
-  for (const [id, title, months, price, isFree, isActive, sortOrder] of defaultPlans) {
-    await execute(
-      `INSERT INTO subscription_plans (id,title,months,price,is_free,is_active,sort_order)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (id) DO NOTHING`,
-      [id, title, months, price, isFree, isActive, sortOrder],
-    );
-  }
+insertPlan.run("free", "رایگان", 0, 0, 1, 1, 1);
+insertPlan.run("7d", "۷ روزه", 0, 0, 0, 1, 2);
+insertPlan.run("1m", "یک ماهه", 1, 0, 0, 1, 3);
+insertPlan.run("3m", "سه ماهه", 3, 0, 0, 1, 4);
+insertPlan.run("6m", "شش ماهه", 6, 0, 0, 1, 5);
+insertPlan.run("1y", "یک ساله", 12, 0, 0, 1, 6);
 
-  const defaultFeatures: [string, string, string, boolean][] = [
-    ["free-modern", "free", "modern_editor", true],
-    ["free-classic", "free", "classic_editor", true],
-    ["free-pro", "free", "pro_editor", true],
-  ];
-  for (const [id, planId, featureKey, enabled] of defaultFeatures) {
-    await execute(
-      `INSERT INTO subscription_features (id,plan_id,feature_key,enabled)
-       VALUES ($1,$2,$3,$4) ON CONFLICT (id) DO NOTHING`,
-      [id, planId, featureKey, enabled],
-    );
-  }
+const insertFeature = db.prepare(`
+INSERT OR IGNORE INTO subscription_features
+(id,plan_id,feature_key,enabled)
+VALUES (?,?,?,?)
+`);
 
-  // برای هر کاربری که هنوز رکورد subscriptions ندارد، یک رکورد رایگان بساز
-  const usersWithoutSub = await query<{ username: string }>(
-    `SELECT u.username FROM users u LEFT JOIN subscriptions s ON s.username = u.username WHERE s.username IS NULL`,
+insertFeature.run("free-modern", "free", "modern_editor", 1);
+insertFeature.run("free-classic", "free", "classic_editor", 1);
+insertFeature.run("free-pro", "free", "pro_editor", 1);
+
+const allUsers = db.prepare("SELECT username FROM users").all() as { username: string }[];
+
+const insertSubscription = db.prepare(`
+  INSERT OR IGNORE INTO subscriptions
+  (id, username, plan, status, start_date, expire_date, created_at, updated_at)
+  VALUES (?, ?, 'free', 'free', '', '', ?, ?)
+`);
+
+allUsers.forEach(u => {
+  const now = new Date().toISOString();
+  insertSubscription.run(
+    crypto.randomUUID(),
+    u.username,
+    now,
+    now
   );
-  for (const u of usersWithoutSub) {
-    const now = new Date().toISOString();
-    await execute(
-      `INSERT INTO subscriptions (id, username, plan, status, start_date, expire_date, created_at, updated_at)
-       VALUES ($1,$2,'free','free','','',$3,$3) ON CONFLICT (username) DO NOTHING`,
-      [crypto.randomUUID(), u.username, now],
-    );
-  }
-}
-
+});
 // ─── Helper: کاربر از DB ─────────────────────────────────────────────────────
-async function getUser(username: string): Promise<any | null> {
-  const row = await queryOne<any>(`SELECT * FROM users WHERE LOWER(username)=LOWER($1)`, [username]);
+function getUser(username: string): any | null {
+  const row = db.prepare("SELECT * FROM users WHERE LOWER(username)=LOWER(?)").get(username) as any;
   if (!row) return null;
-  return {
-    ...row, isSuspended: !!row.is_suspended, fullName: row.full_name,
+  return { ...row, isSuspended: !!row.is_suspended, fullName: row.full_name,
     passwordHash: row.password_hash, qrImageUrl: row.qr_image_url,
     qrRequestStatus: row.qr_request_status, qrRequestTime: row.qr_request_time,
-    // pg برای ستون‌های jsonb به‌صورت خودکار JSON را parse می‌کند
-    cardData: row.card_data || {},
-  };
+    cardData: JSON.parse(row.card_data || "{}") };
 }
-
-async function getUserSubscription(username: string): Promise<any | null> {
-  let sub = await queryOne<any>(`SELECT * FROM subscriptions WHERE LOWER(username)=LOWER($1) LIMIT 1`, [username]);
+function getUserSubscription(username: string): any | null {
+  let sub = db
+    .prepare(
+      `SELECT *
+       FROM subscriptions
+       WHERE LOWER(username)=LOWER(?)
+       LIMIT 1`
+    )
+    .get(username) as any;
 
   if (!sub) {
     const now = new Date().toISOString();
-    await execute(
-      `INSERT INTO subscriptions (id, username, plan, status, start_date, expire_date, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-      ["sub-" + Date.now(), username, "free", "free", now, "", now, now],
+
+    db.prepare(`
+      INSERT INTO subscriptions
+      (
+        id,
+        username,
+        plan,
+        status,
+        start_date,
+        expire_date,
+        created_at,
+        updated_at
+      )
+      VALUES (?,?,?,?,?,?,?,?)
+    `).run(
+      "sub-" + Date.now(),
+      username,
+      "free",
+      "free",
+      now,
+      "",
+      now,
+      now
     );
-    sub = await queryOne<any>(`SELECT * FROM subscriptions WHERE LOWER(username)=LOWER($1) LIMIT 1`, [username]);
+
+    sub = db
+      .prepare(
+        `SELECT *
+         FROM subscriptions
+         WHERE LOWER(username)=LOWER(?)
+         LIMIT 1`
+      )
+      .get(username) as any;
   }
 
   return sub;
-}
-
-// ─── تاریخچه بازدید (visit_stats/visit_totals) ────────────────────────────────
-// یک بازدید/کلیک را در جدول‌های visit_totals (مجموع کلی) و visit_stats
-// (سطل‌های روزانه/ساعتی) با یک UPSERT سبک ثبت می‌کند.
-async function recordVisitEvent(
-  username: string,
-  deltas: { visits?: number; scans?: number; linkOpens?: number; buttonClicks?: number },
-) {
-  const v = deltas.visits || 0;
-  const s = deltas.scans || 0;
-  const l = deltas.linkOpens || 0;
-  const b = deltas.buttonClicks || 0;
-
-  await execute(
-    `INSERT INTO visit_totals (username, total_visits, scans, link_opens, button_clicks)
-     VALUES ($1,$2,$3,$4,$5)
-     ON CONFLICT (username) DO UPDATE SET
-       total_visits = visit_totals.total_visits + $2,
-       scans = visit_totals.scans + $3,
-       link_opens = visit_totals.link_opens + $4,
-       button_clicks = visit_totals.button_clicks + $5`,
-    [username, v, s, l, b],
-  );
-
-  const now = new Date();
-  for (const [granularity, period] of [["day", isoDateKey(now)], ["hour", isoHourKey(now)]] as const) {
-    await execute(
-      `INSERT INTO visit_stats (username, granularity, period, visits, scans, link_opens, button_clicks)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)
-       ON CONFLICT (username, granularity, period) DO UPDATE SET
-         visits = visit_stats.visits + $4,
-         scans = visit_stats.scans + $5,
-         link_opens = visit_stats.link_opens + $6,
-         button_clicks = visit_stats.button_clicks + $7`,
-      [username, granularity, period, v, s, l, b],
-    );
-  }
-}
-
-/** ساخت شیء stats کامل (مجموع + تاریخچه روزانه/ساعتی) برای نمایش در پیشخوان کاربر */
-async function buildFullStats(username: string) {
-  const totals = await queryOne<any>(`SELECT * FROM visit_totals WHERE username=$1`, [username]);
-  const dailyRows = await query<any>(`SELECT * FROM visit_stats WHERE username=$1 AND granularity='day'`, [username]);
-  const hourlyRows = await query<any>(`SELECT * FROM visit_stats WHERE username=$1 AND granularity='hour'`, [username]);
-
-  const dailyStats: Record<string, any> = {};
-  dailyRows.forEach((r) => {
-    dailyStats[r.period] = { visits: r.visits, scans: r.scans, linkOpens: r.link_opens, buttonClicks: r.button_clicks };
-  });
-  const hourlyStats: Record<string, any> = {};
-  hourlyRows.forEach((r) => {
-    hourlyStats[r.period] = { visits: r.visits, scans: r.scans, linkOpens: r.link_opens, buttonClicks: r.button_clicks };
-  });
-
-  return {
-    totalVisits: totals?.total_visits || 0,
-    scans: totals?.scans || 0,
-    linkOpens: totals?.link_opens || 0,
-    buttonClicks: totals?.button_clicks || 0,
-    dailyVisits: {}, // فیلد قدیمی — دیگر استفاده نمی‌شود، فقط برای سازگاری تایپ نگه داشته شده
-    dailyStats,
-    hourlyStats,
-  };
 }
 
 // ─── WebSocket Manager ────────────────────────────────────────────────────────
@@ -420,6 +494,8 @@ const wsClients: WsClient[] = [];
 function broadcastToTicket(ticketId: string, payload: object) {
   const msg = JSON.stringify(payload);
   wsClients.forEach(c => {
+    // پیام رو به دو دسته می‌فرستیم: کسی که دقیقاً همین تیکت رو باز کرده،
+    // و هر ادمینی که در حالت "watch_all" است (یعنی روی پنل ادمین، حتی اگه این تیکت خاص را باز نکرده باشد)
     const isWatchingThisTicket = c.ticketId === ticketId;
     const isAdminWatchingAll = c.role === "admin" && c.ticketId === "ALL_ADMIN";
     if ((isWatchingThisTicket || isAdminWatchingAll) && c.ws.readyState === WebSocket.OPEN) {
@@ -445,12 +521,14 @@ function notifyUser(username: string, payload: object) {
 // ─── Multer: آپلود فایل روی دیسک ─────────────────────────────────────────────
 const storage = multer.diskStorage({
   destination: (req: any, file, cb) => {
+    // هر کاربر پوشه خودش رو داره
     const username = req.username || "general";
     const userDir  = path.join(UPLOADS_DIR, username);
     if (!fs.existsSync(userDir)) fs.mkdirSync(userDir, { recursive: true });
     cb(null, userDir);
   },
   filename: (req, file, cb) => {
+    // نام فایل: timestamp + پسوند اصلی
     const ext = path.extname(file.originalname).toLowerCase() || ".jpg";
     cb(null, `${Date.now()}${ext}`);
   },
@@ -481,6 +559,7 @@ const videoUpload = multer({
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());
 
+// سرو فایل‌های آپلود شده
 app.use("/uploads", express.static(UPLOADS_DIR));
 
 // Rate limiter
@@ -500,22 +579,46 @@ app.use((req, res, next) => {
   next();
 });
 
+
+
+// تأیید توکن
+// function verifyToken(req: any, res: any, next: any) {
+//   const token = req.cookies?.authToken || req.headers?.authorization?.replace("Bearer ", "");
+//   if (!token) return res.status(410).json({ message: "توکن معتبر یافت نشد." });
+//   try {
+//     const decoded = jwt.verify(token, JWT_SECRET) as any;
+//     req.username = decoded.username;
+//     next();
+//   } catch { return res.status(401).json({ message: "توکن منقضی یا نامعتبر است." }); }
+// }
+
 function verifyToken(req: any, res: any, next: any) {
+
   const token =
     req.cookies?.authToken ||
     req.headers?.authorization?.replace("Bearer ", "");
 
   if (!token) {
-    return res.status(401).json({ message: "توکن یافت نشد" });
+    return res.status(401).json({
+      message: "توکن یافت نشد"
+    });
   }
 
   try {
+
     const decoded = jwt.verify(token, JWT_SECRET) as any;
-    req.user = decoded;
-    req.username = decoded.username;
+
+    req.user = decoded; // اضافه شود
+    req.username = decoded.username; // برای سازگاری با کدهای قبلی بماند
+
     next();
+
   } catch {
-    return res.status(401).json({ message: "توکن نامعتبر است" });
+
+    return res.status(401).json({
+      message: "توکن نامعتبر است"
+    });
+
   }
 }
 
@@ -535,10 +638,12 @@ app.post("/api/upload", verifyToken, upload.single("image"), async (req: any, re
     return res.json({ url: fileUrl });
   } catch (err) {
     console.error("خطا در فشرده‌سازی تصویر:", err);
+    // در صورت خطای فشرده‌سازی، همان فایل اصلی را برگردان تا کاربر گیر نکند
     return res.json({ url: `/uploads/${req.username}/${req.file.filename}` });
   }
 });
 
+// آپلود برای ادمین (QR و بنر)
 app.post("/api/admin/upload", verifyAdmin, upload.single("image"), async (req: any, res) => {
   if (!req.file) return res.status(400).json({ message: "فایلی ارسال نشد." });
   try {
@@ -558,11 +663,11 @@ app.post("/api/admin/upload-video", verifyAdmin, videoUpload.single("video"), (r
 });
 
 // ─── Auth Routes ──────────────────────────────────────────────────────────────
-app.get("/api/auth/check-username/:username", async (req, res) => {
+app.get("/api/auth/check-username/:username", (req, res) => {
   const u = req.params.username.trim().toLowerCase();
   if (!/^[a-zA-Z0-9]+$/.test(u)) return res.json({ available: false, error: "فقط حروف انگلیسی و اعداد مجاز است" });
   if (u.length < 3 || u.length > 30) return res.json({ available: false, error: "بین ۳ تا ۳۰ کاراکتر" });
-  const exists = await queryOne(`SELECT 1 FROM users WHERE LOWER(username)=$1`, [u]);
+  const exists = db.prepare("SELECT 1 FROM users WHERE LOWER(username)=?").get(u);
   return res.json(exists ? { available: false, error: "این نام کاربری قبلاً ثبت شده" } : { available: true });
 });
 
@@ -578,24 +683,40 @@ app.post("/api/auth/register", async (req, res) => {
   if (password.length < 8)             return res.status(400).json({ message: "رمز عبور حداقل ۸ کاراکتر باشد." });
   if (password !== confirmPassword)    return res.status(400).json({ message: "رمز عبور با تکرار آن مطابقت ندارد." });
   try {
-    await execute(
-      `INSERT INTO users (username,full_name,email,phone,password_hash,card_data) VALUES ($1,$2,$3,$4,$5,$6)`,
-      [u, fullName, email.trim(), phone.trim(), await hashPassword(password), JSON.stringify(createDefaultCardData(fullName))],
-    );
-    const now = new Date().toISOString();
-    await execute(
-      `INSERT INTO subscriptions (id, username, plan, status, start_date, expire_date, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-      ["sub-" + Date.now(), u, "free", "free", now, "", now, now],
-    );
-  } catch (err: any) {
-    const msg = String(err?.message || "");
-    if (err?.code === "23505" || msg.includes("UNIQUE") || msg.includes("duplicate key")) {
-      if (msg.includes("email")) return res.status(400).json({ message: "این ایمیل قبلاً ثبت شده." });
-      if (msg.includes("phone")) return res.status(400).json({ message: "این شماره قبلاً ثبت شده." });
+    db.prepare(`INSERT INTO users (username,full_name,email,phone,password_hash,card_data) VALUES (?,?,?,?,?,?)`)
+      .run(u, fullName, email.trim(), phone.trim(), await hashPassword(password), JSON.stringify(createDefaultCardData(fullName)));
+  const now = new Date().toISOString();
+
+  db.prepare(`
+    INSERT INTO subscriptions
+    (
+      id,
+      username,
+      plan,
+      status,
+      start_date,
+      expire_date,
+      created_at,
+      updated_at
+    )
+    VALUES (?,?,?,?,?,?,?,?)
+  `).run(
+    "sub-" + Date.now(),
+    u,
+    "free",
+    "free",
+    now,
+    "",
+    now,
+    now
+  );
+
+} catch (err: any) {
+    if (err.message?.includes("UNIQUE")) {
+      if (err.message.includes("email")) return res.status(400).json({ message: "این ایمیل قبلاً ثبت شده." });
+      if (err.message.includes("phone")) return res.status(400).json({ message: "این شماره قبلاً ثبت شده." });
       return res.status(400).json({ message: "نام کاربری تکراری است." });
     }
-    console.error(err);
     return res.status(500).json({ message: "خطای سرور." });
   }
   const token = jwt.sign({ username: u }, JWT_SECRET, { expiresIn: "1d" });
@@ -604,6 +725,7 @@ app.post("/api/auth/register", async (req, res) => {
 });
 
 app.post("/api/auth/login", async (req, res) => {
+  // rate limit جداگانه برای login
   const ip  = req.ip || "unknown";
   const now = Date.now();
   if (!loginLimitStore[ip] || now > loginLimitStore[ip].resetTime)
@@ -615,16 +737,15 @@ app.post("/api/auth/login", async (req, res) => {
   const { loginId, password } = req.body;
   if (!loginId || !password) return res.status(400).json({ message: "شناسه کاربری و رمز عبور الزامی است." });
   const id   = loginId.trim().toLowerCase();
-  const user = await queryOne<any>(
-    `SELECT * FROM users WHERE LOWER(email)=$1 OR phone=$1 OR LOWER(username)=$1`,
-    [id],
-  );
+  const user = db.prepare("SELECT * FROM users WHERE LOWER(email)=? OR phone=? OR LOWER(username)=?")
+    .get(id, id, id) as any;
   if (!user || !(await verifyPassword(password, user.password_hash)))
     return res.status(400).json({ message: "شناسه یا رمز عبور اشتباه است." });
   if (user.is_suspended)
     return res.status(403).json({ message: "حساب شما تعلیق شده است.", isSuspended: true });
+  // ارتقاء نرم (lazy) هش‌های قدیمی pbkdf2 به bcrypt، بعد از اولین لاگین موفق
   if (isLegacyHash(user.password_hash))
-    await execute(`UPDATE users SET password_hash=$1 WHERE username=$2`, [await hashPassword(password), user.username]);
+    db.prepare("UPDATE users SET password_hash=? WHERE username=?").run(await hashPassword(password), user.username);
 
   const token = jwt.sign({ username: user.username }, JWT_SECRET, { expiresIn: "10d" });
   res.cookie("authToken", token, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "none", path: "/", maxAge: 864_000_000 });
@@ -640,12 +761,12 @@ app.post("/api/auth/logout", (req, res) => {
   return res.json({ message: "خروج موفق." });
 });
 
-app.get("/api/auth/me", async (req, res) => {
+app.get("/api/auth/me", (req, res) => {
   const token = req.cookies?.authToken || req.headers?.authorization?.replace("Bearer ", "");
   if (!token) return res.status(401).json({ loggedIn: false });
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as any;
-    const user = await queryOne<any>(`SELECT * FROM users WHERE username=$1`, [decoded.username]);
+    const user    = db.prepare("SELECT * FROM users WHERE username=?").get(decoded.username) as any;
     if (!user) return res.status(401).json({ loggedIn: false });
     return res.json({
       loggedIn: true, token,
@@ -664,149 +785,177 @@ app.post("/api/auth/reset-password", async (req, res) => {
   if (!email || !phone || !username || !newPassword)
     return res.status(400).json({ message: "لطفا تمامی فیلدها را وارد کنید." });
   if (newPassword.length < 8) return res.status(400).json({ message: "رمز جدید حداقل ۸ کاراکتر." });
-  const user = await queryOne<any>(
-    `SELECT * FROM users WHERE LOWER(username)=$1 AND LOWER(email)=$2 AND phone=$3`,
-    [username.trim().toLowerCase(), email.trim().toLowerCase(), phone.trim()],
-  );
+  const user = db.prepare("SELECT * FROM users WHERE LOWER(username)=? AND LOWER(email)=? AND phone=?")
+    .get(username.trim().toLowerCase(), email.trim().toLowerCase(), phone.trim()) as any;
   if (!user) return res.status(400).json({ message: "مشخصات وارد شده همخوانی ندارد." });
-  await execute(`UPDATE users SET password_hash=$1 WHERE username=$2`, [await hashPassword(newPassword), user.username]);
+  db.prepare("UPDATE users SET password_hash=? WHERE username=?").run(await hashPassword(newPassword), user.username);
   return res.json({ message: "رمز عبور با موفقیت بازنشانی شد." });
 });
 
 // ─── Card Routes ──────────────────────────────────────────────────────────────
-app.get("/api/card/:username", async (req, res) => {
+app.get("/api/card/:username", (req, res) => {
   const source = (req.query.source as string) || "link";
-  const user   = await getUser(req.params.username);
+  const user   = getUser(req.params.username);
   if (!user) return res.status(404).json({ message: "کارت ویزیت یافت نشد." });
   if (user.isSuspended) return res.status(403).json({ message: "این کارت به دلیل تعلیق حساب غیرفعال است.", isSuspended: true });
 
-  await recordVisitEvent(user.username, {
-    visits: 1,
-    scans: source === "scan" ? 1 : 0,
-    linkOpens: source === "scan" ? 0 : 1,
-  });
+  const cardData = user.cardData;
+  if (!cardData.stats) cardData.stats = { totalVisits: 0, scans: 0, linkOpens: 0, buttonClicks: 0, dailyVisits: {}, dailyStats: {}, hourlyStats: {} };
+  if (!cardData.stats.dailyStats) cardData.stats.dailyStats = {};
+  if (!cardData.stats.hourlyStats) cardData.stats.hourlyStats = {};
 
-  return res.json({ fullName: user.fullName, username: user.username, cardData: user.cardData });
+  cardData.stats.totalVisits++;
+  source === "scan" ? cardData.stats.scans++ : cardData.stats.linkOpens++;
+
+  const today = getJalaliDate(new Date());
+  cardData.stats.dailyVisits[today] = (cardData.stats.dailyVisits[today] || 0) + 1;
+  // نگه‌داری فقط ۳۰ روز اخیر (فرمت قدیمی، برای سازگاری با کد قبلی)
+  const keys = Object.keys(cardData.stats.dailyVisits);
+  if (keys.length > 30) keys.slice(0, keys.length - 30).forEach(k => delete cardData.stats.dailyVisits[k]);
+
+  // ─── تاریخچه جدید (روزانه تا ۶ ماه + ساعتی تا ۲۴ ساعت) برای نمودار چند-متریکی ──
+  const now = new Date();
+  bumpStatBucket(cardData.stats.dailyStats, isoDateKey(now), "visits", 200);
+  bumpStatBucket(cardData.stats.hourlyStats, isoHourKey(now), "visits", 48);
+  const sourceMetric = source === "scan" ? "scans" : "linkOpens";
+  bumpStatBucket(cardData.stats.dailyStats, isoDateKey(now), sourceMetric, 200);
+  bumpStatBucket(cardData.stats.hourlyStats, isoHourKey(now), sourceMetric, 48);
+
+  db.prepare("UPDATE users SET card_data=? WHERE username=?").run(JSON.stringify(cardData), user.username);
+  return res.json({ fullName: user.fullName, username: user.username, cardData });
 });
 
-app.post("/api/card/:username/click", async (req, res) => {
-  const user = await getUser(req.params.username);
+app.post("/api/card/:username/click", (req, res) => {
+  const user = getUser(req.params.username);
   if (!user) return res.status(404).json({ message: "کاربر یافت نشد." });
+  const cd = user.cardData;
+  if (!cd.stats) cd.stats = { totalVisits: 0, scans: 0, linkOpens: 0, buttonClicks: 0, dailyVisits: {}, dailyStats: {}, hourlyStats: {} };
+  if (!cd.stats.dailyStats) cd.stats.dailyStats = {};
+  if (!cd.stats.hourlyStats) cd.stats.hourlyStats = {};
 
-  await recordVisitEvent(user.username, { buttonClicks: 1 });
+  cd.stats.buttonClicks = (cd.stats.buttonClicks || 0) + 1;
 
+  const now = new Date();
+  bumpStatBucket(cd.stats.dailyStats, isoDateKey(now), "buttonClicks", 200);
+  bumpStatBucket(cd.stats.hourlyStats, isoHourKey(now), "buttonClicks", 48);
+
+  db.prepare("UPDATE users SET card_data=? WHERE username=?").run(JSON.stringify(cd), user.username);
   return res.json({ success: true });
 });
 
-app.get("/api/user/card/:username", verifyToken, async (req: any, res) => {
+app.get("/api/user/card/:username", verifyToken, (req: any, res) => {
   if (req.username !== req.params.username && req.username !== "admin")
     return res.status(403).json({ message: "دسترسی غیرمجاز." });
-  const user = await getUser(req.params.username);
+  const user = getUser(req.params.username);
   if (!user) return res.status(404).json({ message: "کاربر یافت نشد." });
-
-  const fullStats = await buildFullStats(user.username);
-  return res.json({ ...user.cardData, stats: fullStats });
+  return res.json(user.cardData);
 });
 
-app.post("/api/user/card/:username", verifyToken, async (req: any, res) => {
+app.post("/api/user/card/:username", verifyToken, (req: any, res) => {
   if (req.username !== req.params.username && req.username !== "admin")
     return res.status(403).json({ message: "دسترسی غیرمجاز." });
-  const user = await getUser(req.params.username);
+  const user = getUser(req.params.username);
   if (!user) return res.status(404).json({ message: "کاربر یافت نشد." });
-  // آمار قفل می‌شه — کاربر نمی‌تونه دستکاری کنه (آمار واقعی از visit_stats/visit_totals می‌آید)
+  // آمار قفل می‌شه — کاربر نمی‌تونه دستکاری کنه
   const newCardData = { ...req.body, stats: user.cardData.stats };
-  await execute(
-    `UPDATE users SET card_data=$1 WHERE LOWER(username)=LOWER($2)`,
-    [JSON.stringify(newCardData), req.params.username],
-  );
+  db.prepare("UPDATE users SET card_data=? WHERE LOWER(username)=LOWER(?)")
+    .run(JSON.stringify(newCardData), req.params.username);
   return res.json({ message: "کارت با موفقیت ذخیره شد.", cardData: newCardData });
 });
 
 // ─── QR ───────────────────────────────────────────────────────────────────────
-app.post("/api/user/:username/qr-request", verifyToken, async (req: any, res) => {
+app.post("/api/user/:username/qr-request", verifyToken, (req: any, res) => {
   if (req.username !== req.params.username) return res.status(403).json({ message: "دسترسی غیرمجاز." });
-  const changed = await execute(
-    `UPDATE users SET qr_request_status='pending', qr_request_time=$1 WHERE LOWER(username)=LOWER($2)`,
-    [new Date().toLocaleString("fa-IR"), req.params.username],
-  );
-  if (!changed) return res.status(404).json({ message: "کاربر یافت نشد." });
+  const result = db.prepare("UPDATE users SET qr_request_status='pending', qr_request_time=? WHERE LOWER(username)=LOWER(?)")
+    .run(new Date().toLocaleString("fa-IR"), req.params.username);
+  if (!result.changes) return res.status(404).json({ message: "کاربر یافت نشد." });
   return res.json({ message: "درخواست کارت فیزیکی ثبت شد." });
 });
 
 // ─── Ticket Routes ────────────────────────────────────────────────────────────
-app.get("/api/user/:username/tickets", verifyToken, async (req: any, res) => {
+app.get("/api/user/:username/tickets", verifyToken, (req: any, res) => {
   if (req.username !== req.params.username && req.username !== "admin")
     return res.status(403).json({ message: "دسترسی غیرمجاز." });
-  const rows = await query<any>(
-    `SELECT * FROM tickets WHERE LOWER(username)=LOWER($1) ORDER BY last_message_at DESC`,
-    [req.params.username],
-  );
+  const rows = db.prepare("SELECT * FROM tickets WHERE LOWER(username)=LOWER(?) ORDER BY last_message_at DESC")
+    .all(req.params.username) as any[];
   return res.json(rows.map(t => ({
     ...t,
     userFullName: t.user_fullname,
     createdAt: t.created_at,
     lastMessageAt: t.last_message_at,
     adminLastReadAt: t.admin_last_read_at,
-    messages: t.messages, // jsonb — از قبل parse شده
+    messages: JSON.parse(t.messages),
   })));
 });
 
-app.post("/api/user/:username/tickets", verifyToken, async (req: any, res) => {
+app.post("/api/user/:username/tickets", verifyToken, (req: any, res) => {
   const { username } = req.params;
   const { title, description } = req.body;
   if (req.username !== username) return res.status(403).json({ message: "دسترسی غیرمجاز." });
   if (!title || !description) return res.status(400).json({ message: "عنوان و توضیحات الزامی است." });
-  const userRow = await queryOne<any>(`SELECT full_name FROM users WHERE username=$1`, [username]);
+  const user = db.prepare("SELECT full_name FROM users WHERE username=?").get(username) as any;
   const now  = new Date();
-  const id = "ticket-" + Date.now();
-  const userFullname = userRow?.full_name || "کاربر";
-  const createdAt =
-    now.toLocaleDateString("fa-IR", { timeZone: "Asia/Tehran" }) +
-    " - " +
-    now.toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tehran" });
-  const messages = [
-    {
-      id: "msg-1",
-      sender: "user",
-      message: description,
-      ts: now.getTime(),
-      createdAt: now.toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tehran" }),
-    },
-  ];
+  const newTicket = {
+    id: "ticket-" + Date.now(), username,
+    user_fullname: user?.full_name || "کاربر",
+    title, description, status: "pending",
+created_at:
+  now.toLocaleDateString("fa-IR", {
+    timeZone: "Asia/Tehran"
+  }) +
+  " - " +
+  now.toLocaleTimeString("fa-IR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Asia/Tehran"
+  }),
 
-  await execute(
-    `INSERT INTO tickets (id,username,user_fullname,title,description,status,created_at,messages,last_message_at,admin_last_read_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-    [id, username, userFullname, title, description, "pending", createdAt, JSON.stringify(messages), now.toISOString(), ""],
-  );
-
-  const ticket = {
-    id, username, userFullName: userFullname, title, description, status: "pending",
-    createdAt, messages, lastMessageAt: now.toISOString(), adminLastReadAt: "",
+messages: JSON.stringify([
+  {
+    id: "msg-1",
+    sender: "user",
+    message: description,
+    ts: now.getTime(),
+    createdAt: now.toLocaleTimeString("fa-IR", {
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: "Asia/Tehran"
+    })
+  }
+]),
   };
+  db.prepare("INSERT INTO tickets (id,username,user_fullname,title,description,status,created_at,messages,last_message_at,admin_last_read_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
+    .run(newTicket.id, newTicket.username, newTicket.user_fullname, newTicket.title,
+      newTicket.description, newTicket.status, newTicket.created_at, newTicket.messages,
+      now.toISOString(), "");
+  const ticket = { ...newTicket, userFullName: newTicket.user_fullname, createdAt: newTicket.created_at, messages: JSON.parse(newTicket.messages), lastMessageAt: now.toISOString(), adminLastReadAt: "" };
   notifyAdmin({ type: "new_ticket", ticket });
   return res.json({ message: "تیکت ثبت شد.", ticket });
 });
 
-app.post("/api/user/:username/tickets/:ticketId/messages", verifyToken, async (req: any, res) => {
+app.post("/api/user/:username/tickets/:ticketId/messages", verifyToken, (req: any, res) => {
   const { username, ticketId } = req.params;
   const { message, attachment } = req.body;
   if (req.username !== username && req.username !== "admin")
     return res.status(403).json({ message: "دسترسی غیرمجاز." });
-  const ticket = await queryOne<any>(`SELECT * FROM tickets WHERE id=$1`, [ticketId]);
+  const ticket = db.prepare("SELECT * FROM tickets WHERE id=?").get(ticketId) as any;
   if (!ticket) return res.status(404).json({ message: "تیکت یافت نشد." });
   if (ticket.status === "ended") return res.status(400).json({ message: "این تیکت بسته شده." });
 
   const isAdmin = req.username === "admin";
-  const messages = ticket.messages; // jsonb — از قبل parse شده
+  const messages = JSON.parse(ticket.messages);
   const now = new Date();
-  const newMsg: any = {
-    id: "msg-" + Date.now(),
-    sender: isAdmin ? "support" : "user",
-    message,
-    ts: now.getTime(),
-    createdAt: now.toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tehran" }),
-  };
+const newMsg: any = {
+  id: "msg-" + Date.now(),
+  sender: isAdmin ? "support" : "user",
+  message,
+  ts: now.getTime(),
+  createdAt: now.toLocaleTimeString("fa-IR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Asia/Tehran"
+  })
+};
   // ارسال فایل/عکس در تیکت فقط برای ادمین مجاز است
   if (attachment && isAdmin) newMsg.attachment = attachment;
 
@@ -815,10 +964,8 @@ app.post("/api/user/:username/tickets/:ticketId/messages", verifyToken, async (r
   const nowIso = now.toISOString();
   const adminLastReadAt = isAdmin ? nowIso : ticket.admin_last_read_at;
 
-  await execute(
-    `UPDATE tickets SET messages=$1, status=$2, last_message_at=$3, admin_last_read_at=$4 WHERE id=$5`,
-    [JSON.stringify(messages), newStatus, nowIso, adminLastReadAt, ticketId],
-  );
+  db.prepare("UPDATE tickets SET messages=?, status=?, last_message_at=?, admin_last_read_at=? WHERE id=?")
+    .run(JSON.stringify(messages), newStatus, nowIso, adminLastReadAt, ticketId);
 
   broadcastToTicket(ticketId, { type: "new_message", ticketId, message: newMsg, newStatus, lastMessageAt: nowIso });
   notifyAdmin({ type: "ticket_updated", ticketId, username, newStatus, lastMessageAt: nowIso });
@@ -827,20 +974,20 @@ app.post("/api/user/:username/tickets/:ticketId/messages", verifyToken, async (r
 });
 
 // ─── علامت‌گذاری تیکت به‌عنوان خوانده‌شده توسط ادمین ──────────────────────────
-app.post("/api/admin/tickets/:ticketId/read", verifyAdmin, async (req, res) => {
+app.post("/api/admin/tickets/:ticketId/read", verifyAdmin, (req, res) => {
   const nowIso = new Date().toISOString();
-  const changed = await execute(`UPDATE tickets SET admin_last_read_at=$1 WHERE id=$2`, [nowIso, req.params.ticketId]);
-  if (!changed) return res.status(404).json({ message: "تیکت یافت نشد." });
+  const result = db.prepare("UPDATE tickets SET admin_last_read_at=? WHERE id=?").run(nowIso, req.params.ticketId);
+  if (result.changes === 0) return res.status(404).json({ message: "تیکت یافت نشد." });
   return res.json({ success: true, adminLastReadAt: nowIso });
 });
 
 // ─── شروع تیکت جدید توسط ادمین برای یک کاربر مشخص ────────────────────────────
-app.post("/api/admin/tickets", verifyAdmin, async (req, res) => {
+app.post("/api/admin/tickets", verifyAdmin, (req, res) => {
   const { username, title, message } = req.body;
   if (!username || !title || !message)
     return res.status(400).json({ message: "کاربر، عنوان و متن پیام الزامی است." });
 
-  const user = await queryOne<any>(`SELECT full_name FROM users WHERE LOWER(username)=LOWER($1)`, [username]);
+  const user = db.prepare("SELECT full_name FROM users WHERE LOWER(username)=LOWER(?)").get(username) as any;
   if (!user) return res.status(404).json({ message: "کاربر یافت نشد." });
 
   const now = new Date();
@@ -849,28 +996,40 @@ app.post("/api/admin/tickets", verifyAdmin, async (req, res) => {
     " - " +
     now.toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tehran" });
 
-  const id = "ticket-" + Date.now();
-  const userFullname = user.full_name || "کاربر";
-  const messages = [
-    {
-      id: "msg-1",
-      sender: "support",
-      message,
-      ts: now.getTime(),
-      createdAt: now.toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tehran" }),
-    },
-  ];
+  const newTicket = {
+    id: "ticket-" + Date.now(),
+    username,
+    user_fullname: user.full_name || "کاربر",
+    title,
+    description: message,
+    status: "under_review",
+    created_at: createdAtStr,
+    messages: JSON.stringify([
+      {
+        id: "msg-1",
+        sender: "support",
+        message,
+        ts: now.getTime(),
+        createdAt: now.toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tehran" }),
+      },
+    ]),
+  };
 
-  await execute(
-    `INSERT INTO tickets (id,username,user_fullname,title,description,status,created_at,messages,last_message_at,admin_last_read_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-    [id, username, userFullname, title, message, "under_review", createdAtStr, JSON.stringify(messages), now.toISOString(), now.toISOString()],
+  db.prepare(
+    "INSERT INTO tickets (id,username,user_fullname,title,description,status,created_at,messages,last_message_at,admin_last_read_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+  ).run(
+    newTicket.id, newTicket.username, newTicket.user_fullname, newTicket.title,
+    newTicket.description, newTicket.status, newTicket.created_at, newTicket.messages,
+    now.toISOString(), now.toISOString(), // چون ادمین خودش این را نوشته، از نظر او خوانده‌شده است
   );
 
   const ticket = {
-    id, username, userFullName: userFullname, title, description: message,
-    status: "under_review", createdAt: createdAtStr, messages,
-    lastMessageAt: now.toISOString(), adminLastReadAt: now.toISOString(),
+    ...newTicket,
+    userFullName: newTicket.user_fullname,
+    createdAt: newTicket.created_at,
+    messages: JSON.parse(newTicket.messages),
+    lastMessageAt: now.toISOString(),
+    adminLastReadAt: now.toISOString(),
   };
 
   notifyUser(username, { type: "new_ticket", ticket });
@@ -878,26 +1037,35 @@ app.post("/api/admin/tickets", verifyAdmin, async (req, res) => {
 });
 
 // ─── Admin Routes ─────────────────────────────────────────────────────────────
-app.get("/api/admin/stats", verifyAdmin, async (req, res) => {
-  const totalCustomers = Number((await queryOne<any>(`SELECT COUNT(*) as c FROM users WHERE username!='admin'`))?.c || 0);
-  const cardsWithQr    = Number((await queryOne<any>(`SELECT COUNT(*) as c FROM users WHERE qr_request_status='approved'`))?.c || 0);
-  const totalVisits    = Number((await queryOne<any>(`SELECT COALESCE(SUM(total_visits),0) as s FROM visit_totals`))?.s || 0);
+app.get("/api/admin/stats", verifyAdmin, (req, res) => {
+  const totalCustomers = (db.prepare("SELECT COUNT(*) as c FROM users WHERE username!='admin'").get() as any).c;
+  const cardsWithQr    = (db.prepare("SELECT COUNT(*) as c FROM users WHERE qr_request_status='approved'").get() as any).c;
+  const rows           = db.prepare("SELECT card_data FROM users").all() as any[];
+  const totalVisits    = rows.reduce((acc, r) => acc + (JSON.parse(r.card_data)?.stats?.totalVisits || 0), 0);
 
-  const proUsersCount = Number((await queryOne<any>(
-    `SELECT COUNT(*) as c FROM subscriptions WHERE status='active' AND expire_date > $1 AND LOWER(username) != 'admin'`,
-    [new Date().toISOString()],
-  ))?.c || 0);
+  // تعداد کاربران دارای اشتراک پرو فعال و معتبر (منقضی‌نشده)
+  const proUsersCount = (db.prepare(
+    `SELECT COUNT(*) as c FROM subscriptions WHERE status='active' AND expire_date > ? AND LOWER(username) != 'admin'`
+  ).get(new Date().toISOString()) as any).c;
 
-  // ── تجمیع بازدید روزانه/ساعتی سایت (SUM با SQL، مستقیم از visit_stats) ──
-  const dailyVisitRows = await query<any>(`SELECT period, SUM(visits) as v FROM visit_stats WHERE granularity='day' GROUP BY period`);
-  const hourlyVisitRows = await query<any>(`SELECT period, SUM(visits) as v FROM visit_stats WHERE granularity='hour' GROUP BY period`);
+  // ── تجمیع بازدید روزانه/ساعتی سایت (از دیتای هر کارت) ──
   const dailyVisits: Record<string, number> = {};
-  dailyVisitRows.forEach((r) => { dailyVisits[r.period] = Number(r.v) || 0; });
   const hourlyVisits: Record<string, number> = {};
-  hourlyVisitRows.forEach((r) => { hourlyVisits[r.period] = Number(r.v) || 0; });
+  rows.forEach((r) => {
+    let cd: any = {};
+    try { cd = JSON.parse(r.card_data); } catch { return; }
+    Object.entries(cd?.stats?.dailyStats || {}).forEach(([key, val]: [string, any]) => {
+      dailyVisits[key] = (dailyVisits[key] || 0) + (val.visits || 0);
+    });
+    Object.entries(cd?.stats?.hourlyStats || {}).forEach(([key, val]: [string, any]) => {
+      hourlyVisits[key] = (hourlyVisits[key] || 0) + (val.visits || 0);
+    });
+  });
 
   // ── مشتریان جدید در هر روز/ساعت (بر اساس زمان ثبت‌نام) ──
-  const signupRows = await query<any>(`SELECT created_at FROM subscriptions WHERE LOWER(username) != 'admin'`);
+  const signupRows = db.prepare(
+    `SELECT created_at FROM subscriptions WHERE LOWER(username) != 'admin'`
+  ).all() as any[];
   const dailySignups: Record<string, number> = {};
   const hourlySignups: Record<string, number> = {};
   signupRows.forEach((s) => {
@@ -909,7 +1077,9 @@ app.get("/api/admin/stats", verifyAdmin, async (req, res) => {
   });
 
   // ── تایید کیوآرکد در هر روز/ساعت ──
-  const qrRows = await query<any>(`SELECT qr_approved_at FROM users WHERE qr_approved_at != ''`);
+  const qrRows = db.prepare(
+    `SELECT qr_approved_at FROM users WHERE qr_approved_at != ''`
+  ).all() as any[];
   const dailyQrApprovals: Record<string, number> = {};
   const hourlyQrApprovals: Record<string, number> = {};
   qrRows.forEach((q) => {
@@ -920,7 +1090,9 @@ app.get("/api/admin/stats", verifyAdmin, async (req, res) => {
   });
 
   // ── فعال‌سازی پلن پرو در هر روز/ساعت ──
-  const proRows = await query<any>(`SELECT approved_at FROM subscription_purchases WHERE payment_status='approved' AND approved_at != ''`);
+  const proRows = db.prepare(
+    `SELECT approved_at FROM subscription_purchases WHERE payment_status='approved' AND approved_at != ''`
+  ).all() as any[];
   const dailyProActivations: Record<string, number> = {};
   const hourlyProActivations: Record<string, number> = {};
   proRows.forEach((p) => {
@@ -930,6 +1102,7 @@ app.get("/api/admin/stats", verifyAdmin, async (req, res) => {
     hourlyProActivations[hKey] = (hourlyProActivations[hKey] || 0) + 1;
   });
 
+  // ترکیب هر ۴ متریک، دقیقا معادل ۴ کارت آماری بالای پیشخوان ادمین
   const allDailyKeys = new Set([
     ...Object.keys(dailyVisits), ...Object.keys(dailySignups),
     ...Object.keys(dailyQrApprovals), ...Object.keys(dailyProActivations),
@@ -961,103 +1134,214 @@ app.get("/api/admin/stats", verifyAdmin, async (req, res) => {
   return res.json({ totalCustomers, cardsWithQr, totalVisits, proUsersCount, dailyStats, hourlyStats });
 });
 
-app.get("/api/admin/users", verifyAdmin, async (req, res) => {
-  const rows = await query<any>(`SELECT * FROM users WHERE username!='admin'`);
+app.get("/api/admin/users", verifyAdmin, (req, res) => {
+  const rows = db.prepare("SELECT * FROM users WHERE username!='admin'").all() as any[];
   return res.json(rows.map(r => ({
     fullName: r.full_name, username: r.username, email: r.email, phone: r.phone,
     isSuspended: !!r.is_suspended, qrRequestStatus: r.qr_request_status,
     qrImageUrl: r.qr_image_url, qrRequestTime: r.qr_request_time,
-    cardData: r.card_data,
+    cardData: JSON.parse(r.card_data),
   })));
 });
+// ای پی ای کارت به کارت به پنل ادمین
+app.get("/api/admin/subscription-purchases", verifyAdmin, (req, res) => {
 
-app.get("/api/admin/subscription-purchases", verifyAdmin, async (req, res) => {
-  const rows = await query(
-    `SELECT sp.*, u.full_name
-     FROM subscription_purchases sp
-     JOIN users u ON sp.username = u.username
-     ORDER BY sp.created_at DESC`,
-  );
+  const rows = db.prepare(`
+    SELECT 
+      sp.*,
+      u.full_name
+    FROM subscription_purchases sp
+    JOIN users u 
+    ON sp.username = u.username
+    ORDER BY sp.created_at DESC
+  `).all();
+
   return res.json(rows);
+
 });
 
-app.get("/api/debug/subscriptions", async (req, res) => {
-  const rows = await query(`SELECT * FROM subscriptions`);
+
+
+// متن تست برای دیتا بیس سیستم کارت به کارت دستی
+
+app.get("/api/debug/subscriptions", (req, res) => {
+
+  const rows = db.prepare(`
+    SELECT * FROM subscriptions
+  `).all();
+
   res.json(rows);
+
 });
 
-app.post("/api/admin/subscription-purchases/:id/approve", verifyAdmin, async (req, res) => {
-  const purchaseId = req.params.id;
-  const purchase = await queryOne<any>(`SELECT * FROM subscription_purchases WHERE id = $1`, [purchaseId]);
 
-  if (!purchase) return res.status(404).json({ success: false });
-  if (purchase.payment_status === "approved") return res.json({ success: true });
+app.post("/api/admin/subscription-purchases/:id/approve", verifyAdmin, (req, res) => {
+
+  const purchaseId = req.params.id;
+
+  const purchase = db.prepare(`
+    SELECT * FROM subscription_purchases
+    WHERE id = ?
+  `).get(purchaseId) as any;
+
+  if (!purchase) {
+    return res.status(404).json({
+      success: false
+    });
+  }
+
+  if (purchase.payment_status === "approved") {
+    return res.json({
+      success: true
+    });
+  }
 
   const now = new Date();
-  const base = await getStackedBaseDate(purchase.username);
+
+  const base = getStackedBaseDate(purchase.username);
+
   const expire = addPlanDuration(base, purchase.plan);
 
-  await execute(
-    `UPDATE subscription_purchases
-     SET payment_status='approved', approved_at=$1, approved_by='admin', start_date=$2, expire_date=$3
-     WHERE id=$4`,
-    [now.toISOString(), now.toISOString(), expire.toISOString(), purchaseId],
+  db.prepare(`
+    UPDATE subscription_purchases
+    SET
+      payment_status='approved',
+      approved_at=?,
+      approved_by='admin',
+      start_date=?,
+      expire_date=?
+    WHERE id=?
+  `).run(
+    now.toISOString(),
+    now.toISOString(),
+    expire.toISOString(),
+    purchaseId
   );
 
-  await execute(
-    `INSERT INTO subscriptions(id, username, plan, status, start_date, expire_date, created_at, updated_at)
-     VALUES($1,$2,$3,$4,$5,$6,$7,$8)
-     ON CONFLICT(username)
-     DO UPDATE SET
-       plan=excluded.plan, status='active',
-       start_date=excluded.start_date, expire_date=excluded.expire_date,
-       updated_at=excluded.updated_at`.replace(/excluded\./g, "EXCLUDED."),
-    [crypto.randomUUID(), purchase.username, purchase.plan, "active", now.toISOString(), expire.toISOString(), now.toISOString(), now.toISOString()],
+  db.prepare(`
+    INSERT INTO subscriptions(
+      id,
+      username,
+      plan,
+      status,
+      start_date,
+      expire_date,
+      created_at,
+      updated_at
+    )
+    VALUES(
+      ?,?,?,?,?,?,?,?
+    )
+    ON CONFLICT(username)
+    DO UPDATE SET
+
+      plan=excluded.plan,
+
+      status='active',
+
+      start_date=excluded.start_date,
+
+      expire_date=excluded.expire_date,
+
+      updated_at=excluded.updated_at
+  `).run(
+
+    crypto.randomUUID(),
+
+    purchase.username,
+
+    purchase.plan,
+
+    "active",
+
+    now.toISOString(),
+
+    expire.toISOString(),
+
+    now.toISOString(),
+
+    now.toISOString()
+
   );
 
-  res.json({ success: true });
+  res.json({
+    success:true
+  });
+
 });
 
 // ──────────────────────────────────────────────────────────────────────────
 // API: فعال‌سازی مستقیم پلن توسط ادمین (بدون نیاز به رسید کارت‌به‌کارت)
+// پلن‌های مجاز: ۷ روزه، ۱ ماهه، ۳ ماهه، ۶ ماهه، ۱ ساله
 // ──────────────────────────────────────────────────────────────────────────
-app.post("/api/admin/users/:username/activate-plan", verifyAdmin, async (req: any, res) => {
+app.post("/api/admin/users/:username/activate-plan", verifyAdmin, (req: any, res) => {
   const username = req.params.username;
   const { plan } = req.body;
 
   if (!MANUAL_PLAN_LABELS[plan]) {
-    return res.status(400).json({ success: false, message: "پلن انتخاب‌شده معتبر نیست." });
+    return res.status(400).json({
+      success: false,
+      message: "پلن انتخاب‌شده معتبر نیست.",
+    });
   }
 
-  const user = await queryOne(`SELECT username FROM users WHERE LOWER(username)=LOWER($1)`, [username]);
-  if (!user) return res.status(404).json({ success: false, message: "کاربر یافت نشد." });
+  const user = db.prepare("SELECT username FROM users WHERE LOWER(username)=LOWER(?)").get(username);
+  if (!user) {
+    return res.status(404).json({ success: false, message: "کاربر یافت نشد." });
+  }
 
   const now = new Date();
-  const base = await getStackedBaseDate(username);
+  const base = getStackedBaseDate(username);
   const expire = addPlanDuration(base, plan);
 
-  await execute(
-    `INSERT INTO subscriptions(id, username, plan, status, start_date, expire_date, created_at, updated_at)
-     VALUES($1,$2,$3,$4,$5,$6,$7,$8)
-     ON CONFLICT(username)
-     DO UPDATE SET
-       plan=EXCLUDED.plan, status='active',
-       start_date=EXCLUDED.start_date, expire_date=EXCLUDED.expire_date,
-       updated_at=EXCLUDED.updated_at`,
-    [crypto.randomUUID(), username, plan, "active", now.toISOString(), expire.toISOString(), now.toISOString(), now.toISOString()],
+  // ۱. بروزرسانی وضعیت فعلی اشتراک کاربر
+  db.prepare(`
+    INSERT INTO subscriptions(
+      id, username, plan, status, start_date, expire_date, created_at, updated_at
+    )
+    VALUES(?,?,?,?,?,?,?,?)
+    ON CONFLICT(username)
+    DO UPDATE SET
+      plan=excluded.plan,
+      status='active',
+      start_date=excluded.start_date,
+      expire_date=excluded.expire_date,
+      updated_at=excluded.updated_at
+  `).run(
+    crypto.randomUUID(),
+    username,
+    plan,
+    "active",
+    now.toISOString(),
+    expire.toISOString(),
+    now.toISOString(),
+    now.toISOString(),
   );
 
-  await execute(
-    `INSERT INTO subscription_purchases (
-       id, username, plan, duration_months, amount, payment_method,
-       payment_status, transaction_id, receipt_image, description,
-       created_at, approved_at, approved_by, start_date, expire_date
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
-    [
-      crypto.randomUUID(), username, plan, 0, 0, "manual", "approved", "", "",
-      `فعال‌سازی مستقیم پلن ${MANUAL_PLAN_LABELS[plan]} توسط ادمین`,
-      now.toISOString(), now.toISOString(), "admin", now.toISOString(), expire.toISOString(),
-    ],
+  // ۲. ثبت این فعال‌سازی در تاریخچه (تا در گزارش فعال‌سازی‌ها نمایش داده شود)
+  db.prepare(`
+    INSERT INTO subscription_purchases (
+      id, username, plan, duration_months, amount, payment_method,
+      payment_status, transaction_id, receipt_image, description,
+      created_at, approved_at, approved_by, start_date, expire_date
+    )
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  `).run(
+    crypto.randomUUID(),
+    username,
+    plan,
+    0,
+    0,
+    "manual",
+    "approved",
+    "",
+    "",
+    `فعال‌سازی مستقیم پلن ${MANUAL_PLAN_LABELS[plan]} توسط ادمین`,
+    now.toISOString(),
+    now.toISOString(),
+    "admin",
+    now.toISOString(),
+    expire.toISOString(),
   );
 
   return res.json({ success: true });
@@ -1066,15 +1350,23 @@ app.post("/api/admin/users/:username/activate-plan", verifyAdmin, async (req: an
 // ──────────────────────────────────────────────────────────────────────────
 // API: گزارش کامل وضعیت اشتراک همه کاربران (تاریخ ثبت‌نام، پلن، بازه اعتبار)
 // ──────────────────────────────────────────────────────────────────────────
-app.get("/api/admin/subscriptions-overview", verifyAdmin, async (req, res) => {
-  const rows = await query<any>(`
-    SELECT u.username, u.full_name, u.email, u.phone,
-           s.plan, s.status, s.start_date, s.expire_date, s.created_at AS registered_at
+app.get("/api/admin/subscriptions-overview", verifyAdmin, (req, res) => {
+  const rows = db.prepare(`
+    SELECT
+      u.username,
+      u.full_name,
+      u.email,
+      u.phone,
+      s.plan,
+      s.status,
+      s.start_date,
+      s.expire_date,
+      s.created_at AS registered_at
     FROM users u
     LEFT JOIN subscriptions s ON s.username = u.username
     WHERE u.username != 'admin'
     ORDER BY s.created_at DESC
-  `);
+  `).all() as any[];
 
   const now = Date.now();
   const data = rows.map((r) => {
@@ -1091,262 +1383,419 @@ app.get("/api/admin/subscriptions-overview", verifyAdmin, async (req, res) => {
 
 app.post("/api/admin/users/:username/edit", verifyAdmin, async (req, res) => {
   const { fullName, email, phone, password } = req.body;
-  const changed = await execute(
-    `UPDATE users SET full_name=$1,email=$2,phone=$3 WHERE LOWER(username)=LOWER($4)`,
-    [fullName, email, phone, req.params.username],
-  );
-  if (!changed) return res.status(404).json({ message: "کاربر یافت نشد." });
-  if (password) await execute(`UPDATE users SET password_hash=$1 WHERE LOWER(username)=LOWER($2)`, [await hashPassword(password), req.params.username]);
+  const result = db.prepare("UPDATE users SET full_name=?,email=?,phone=? WHERE LOWER(username)=LOWER(?)")
+    .run(fullName, email, phone, req.params.username);
+  if (!result.changes) return res.status(404).json({ message: "کاربر یافت نشد." });
+  if (password) db.prepare("UPDATE users SET password_hash=? WHERE LOWER(username)=LOWER(?)").run(await hashPassword(password), req.params.username);
   return res.json({ message: "مشخصات کاربر ویرایش شد." });
 });
 
-app.post("/api/admin/users/:username/toggle-suspend", verifyAdmin, async (req, res) => {
-  const row = await queryOne<any>(`SELECT is_suspended FROM users WHERE LOWER(username)=LOWER($1)`, [req.params.username]);
+app.post("/api/admin/users/:username/toggle-suspend", verifyAdmin, (req, res) => {
+  const row = db.prepare("SELECT is_suspended FROM users WHERE LOWER(username)=LOWER(?)").get(req.params.username) as any;
   if (!row) return res.status(404).json({ message: "کاربر یافت نشد." });
-  const newStatus = !row.is_suspended;
-  await execute(`UPDATE users SET is_suspended=$1 WHERE LOWER(username)=LOWER($2)`, [newStatus, req.params.username]);
-  return res.json({ message: newStatus ? "کاربر تعلیق شد." : "تعلیق برطرف شد.", isSuspended: newStatus });
+  const newStatus = row.is_suspended ? 0 : 1;
+  db.prepare("UPDATE users SET is_suspended=? WHERE LOWER(username)=LOWER(?)").run(newStatus, req.params.username);
+  return res.json({ message: newStatus ? "کاربر تعلیق شد." : "تعلیق برطرف شد.", isSuspended: !!newStatus });
 });
 
-app.post("/api/admin/users/:username/reset", verifyAdmin, async (req, res) => {
-  const row = await queryOne<any>(`SELECT full_name FROM users WHERE LOWER(username)=LOWER($1)`, [req.params.username]);
+app.post("/api/admin/users/:username/reset", verifyAdmin, (req, res) => {
+  const row = db.prepare("SELECT full_name FROM users WHERE LOWER(username)=LOWER(?)").get(req.params.username) as any;
   if (!row) return res.status(404).json({ message: "کاربر یافت نشد." });
-  await execute(
-    `UPDATE users SET card_data=$1 WHERE LOWER(username)=LOWER($2)`,
-    [JSON.stringify(createDefaultCardData(row.full_name)), req.params.username],
-  );
+  db.prepare("UPDATE users SET card_data=? WHERE LOWER(username)=LOWER(?)")
+    .run(JSON.stringify(createDefaultCardData(row.full_name)), req.params.username);
   return res.json({ message: "کارت ویزیت کاربر ریست شد." });
 });
 
-app.post("/api/admin/users/:username/delete", verifyAdmin, async (req, res) => {
+app.post("/api/admin/users/:username/delete", verifyAdmin, (req, res) => {
+  // حذف فایل‌های آپلود شده کاربر
   const userUploads = path.join(UPLOADS_DIR, req.params.username);
   if (fs.existsSync(userUploads)) fs.rmSync(userUploads, { recursive: true });
-  const changed = await execute(`DELETE FROM users WHERE LOWER(username)=LOWER($1) AND username!='admin'`, [req.params.username]);
-  if (!changed) return res.status(404).json({ message: "کاربر یافت نشد." });
+  const result = db.prepare("DELETE FROM users WHERE LOWER(username)=LOWER(?) AND username!='admin'").run(req.params.username);
+  if (!result.changes) return res.status(404).json({ message: "کاربر یافت نشد." });
   return res.json({ message: "حساب کاربر حذف شد." });
 });
 
-app.post("/api/admin/users/:username/bypass-login", verifyAdmin, async (req, res) => {
-  const row = await queryOne<any>(`SELECT username FROM users WHERE LOWER(username)=LOWER($1)`, [req.params.username]);
+app.post("/api/admin/users/:username/bypass-login", verifyAdmin, (req, res) => {
+  const row = db.prepare("SELECT username FROM users WHERE LOWER(username)=LOWER(?)").get(req.params.username) as any;
   if (!row) return res.status(404).json({ message: "کاربر یافت نشد." });
   const token = jwt.sign({ username: row.username }, JWT_SECRET, { expiresIn: "10d" });
   res.cookie("authToken", token, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "none", path: "/", maxAge: 864_000_000 });
   return res.json({ success: true, token, username: row.username });
 });
 
-app.get("/api/admin/qr-requests", verifyAdmin, async (req, res) => {
-  const rows = await query<any>(`SELECT full_name,username,qr_request_status,qr_image_url,qr_request_time FROM users WHERE qr_request_status!='none'`);
+app.get("/api/admin/qr-requests", verifyAdmin, (req, res) => {
+  const rows = db.prepare("SELECT full_name,username,qr_request_status,qr_image_url,qr_request_time FROM users WHERE qr_request_status!='none'").all() as any[];
   return res.json(rows.map(r => ({ fullName: r.full_name, username: r.username,
     qrRequestStatus: r.qr_request_status, qrImageUrl: r.qr_image_url, qrRequestTime: r.qr_request_time || "ثبت نشده" })));
 });
 
-app.post("/api/admin/qr-requests/:username/approve", verifyAdmin, async (req, res) => {
+app.post("/api/admin/qr-requests/:username/approve", verifyAdmin, (req, res) => {
   const { qrImageUrl } = req.body;
   if (!qrImageUrl) return res.status(400).json({ message: "آدرس QR الزامی است." });
-  const changed = await execute(
-    `UPDATE users SET qr_request_status='approved',qr_image_url=$1,qr_approved_at=$2 WHERE LOWER(username)=LOWER($3)`,
-    [qrImageUrl, new Date().toISOString(), req.params.username],
-  );
-  if (!changed) return res.status(404).json({ message: "کاربر یافت نشد." });
+  const result = db.prepare("UPDATE users SET qr_request_status='approved',qr_image_url=?,qr_approved_at=? WHERE LOWER(username)=LOWER(?)")
+    .run(qrImageUrl, new Date().toISOString(), req.params.username);
+  if (!result.changes) return res.status(404).json({ message: "کاربر یافت نشد." });
   return res.json({ message: "QR کاربر تأیید شد." });
 });
 
-app.get("/api/admin/tickets", verifyAdmin, async (req, res) => {
-  const rows = await query<any>(`SELECT * FROM tickets ORDER BY last_message_at DESC`);
+app.get("/api/admin/tickets", verifyAdmin, (req, res) => {
+  const rows = db.prepare("SELECT * FROM tickets ORDER BY last_message_at DESC").all() as any[];
   return res.json(rows.map(t => ({
     ...t,
     userFullName: t.user_fullname,
     createdAt: t.created_at,
     lastMessageAt: t.last_message_at,
     adminLastReadAt: t.admin_last_read_at,
-    messages: t.messages,
+    messages: JSON.parse(t.messages),
   })));
 });
 
-app.post("/api/admin/tickets/:ticketId/status", verifyAdmin, async (req, res) => {
+app.post("/api/admin/tickets/:ticketId/status", verifyAdmin, (req, res) => {
   const { status } = req.body;
-  const changed = await execute(`UPDATE tickets SET status=$1 WHERE id=$2`, [status, req.params.ticketId]);
-  if (!changed) return res.status(404).json({ message: "تیکت یافت نشد." });
+  const result = db.prepare("UPDATE tickets SET status=? WHERE id=?").run(status, req.params.ticketId);
+  if (!result.changes) return res.status(404).json({ message: "تیکت یافت نشد." });
   return res.json({ message: "وضعیت تیکت تغییر کرد.", status });
 });
 
 // ─── Announcements ────────────────────────────────────────────────────────────
-app.get("/api/announcements", async (req, res) => {
-  return res.json(await query(`SELECT * FROM announcements ORDER BY created_at DESC`));
+app.get("/api/announcements", (req, res) => {
+  return res.json(db.prepare("SELECT * FROM announcements ORDER BY created_at DESC").all());
 });
 
-app.post("/api/admin/announcements", verifyAdmin, async (req, res) => {
+app.post("/api/admin/announcements", verifyAdmin, (req, res) => {
   const { title, description, image } = req.body;
   if (!title || !description) return res.status(400).json({ message: "عنوان و توضیحات الزامی است." });
   const newAnn = { id: "ann-" + Date.now(), title, description,
     image: image || "https://images.unsplash.com/photo-1620121692029-d088224ddc74?w=800&q=80",
     created_at: new Date().toLocaleDateString("fa-IR") };
-  await execute(
-    `INSERT INTO announcements (id,title,description,image,created_at) VALUES ($1,$2,$3,$4,$5)`,
-    [newAnn.id, newAnn.title, newAnn.description, newAnn.image, newAnn.created_at],
-  );
+  db.prepare("INSERT INTO announcements (id,title,description,image,created_at) VALUES (?,?,?,?,?)")
+    .run(newAnn.id, newAnn.title, newAnn.description, newAnn.image, newAnn.created_at);
   return res.json(newAnn);
 });
 
-app.delete("/api/admin/announcements/:id", verifyAdmin, async (req, res) => {
-  await execute(`DELETE FROM announcements WHERE id=$1`, [req.params.id]);
+app.delete("/api/admin/announcements/:id", verifyAdmin, (req, res) => {
+  db.prepare("DELETE FROM announcements WHERE id=?").run(req.params.id);
   return res.json({ message: "اعلان حذف شد." });
 });
 
 // ─── Banners ──────────────────────────────────────────────────────────────────
-app.get("/api/banners", async (req, res) => {
-  const rows = await query<any>(`SELECT * FROM banners`);
-  return res.json(rows.map((b) => ({ ...b, imageUrl: b.image_url, link: b.link_url, videoUrl: b.video_url })));
+app.get("/api/banners", (req, res) => {
+  return res.json(db.prepare("SELECT * FROM banners").all()
+    .map((b: any) => ({ ...b, imageUrl: b.image_url, link: b.link_url, videoUrl: b.video_url })));
 });
 
-app.post("/api/admin/banners", verifyAdmin, async (req, res) => {
+app.post("/api/admin/banners", verifyAdmin, (req, res) => {
   const {
     banner1, title1, link1,
     banner2, title2, link2,
     banner3, title3, link3,
     trainingVideoUrl, trainingVideoTitle,
   } = req.body;
-
-  const upsertBanner = async (id: string, imageUrl: string, title: string, linkUrl: string, videoUrl: string) => {
-    await execute(
-      `INSERT INTO banners (id,image_url,title,link_url,video_url) VALUES ($1,$2,$3,$4,$5)
-       ON CONFLICT (id) DO UPDATE SET
-         image_url=EXCLUDED.image_url, title=EXCLUDED.title,
-         link_url=EXCLUDED.link_url, video_url=EXCLUDED.video_url`,
-      [id, imageUrl, title, linkUrl, videoUrl],
-    );
-  };
-
-  await upsertBanner("banner1", banner1 || "", title1 || "بنر اول", link1 || "", "");
-  await upsertBanner("banner2", banner2 || "", title2 || "بنر دوم", link2 || "", "");
-  await upsertBanner("banner3", banner3 || "", title3 || "بنر سوم", link3 || "", "");
-  await upsertBanner("training_video", "", trainingVideoTitle || "ویدیو آموزشی", "", trainingVideoUrl || "");
-
-  return res.json({ message: "بنرها ویرایش شد.", banners: await query(`SELECT * FROM banners`) });
+  const upsert = db.prepare("INSERT OR REPLACE INTO banners (id,image_url,title,link_url,video_url) VALUES (?,?,?,?,?)");
+  upsert.run("banner1", banner1 || "", title1 || "بنر اول", link1 || "", "");
+  upsert.run("banner2", banner2 || "", title2 || "بنر دوم", link2 || "", "");
+  upsert.run("banner3", banner3 || "", title3 || "بنر سوم", link3 || "", "");
+  upsert.run("training_video", "", trainingVideoTitle || "ویدیو آموزشی", "", trainingVideoUrl || "");
+  return res.json({ message: "بنرها ویرایش شد.", banners: db.prepare("SELECT * FROM banners").all() });
 });
+
 
 // ──────────────────────────────────────────────────────────────────────────
 // API: وضعیت اشتراک کاربر
 // ──────────────────────────────────────────────────────────────────────────
-app.get('/api/subscription', verifyToken, async (req: any, res) => {
-  const sub = await getUserSubscription(req.username);
+app.get('/api/subscription', verifyToken, (req: any, res) => {
+  const sub = getUserSubscription(req.username);
 
   if (!sub) {
-    return res.json({ plan: 'free', status: 'free', expireDate: null, remainingDays: 0 });
+    return res.json({
+      plan: 'free',
+      status: 'free',
+      expireDate: null,
+      remainingDays: 0
+    });
   }
 
   let remainingDays = 0;
+
   if (sub.expire_date) {
     const diff = new Date(sub.expire_date).getTime() - Date.now();
     remainingDays = Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
   }
 
-  res.json({ plan: sub.plan, status: sub.status, startDate: sub.start_date, expireDate: sub.expire_date, remainingDays });
+  res.json({
+    plan: sub.plan,
+    status: sub.status,
+    startDate: sub.start_date,
+    expireDate: sub.expire_date,
+    remainingDays
+  });
 });
+
+
 
 // ──────────────────────────────────────────────────────────────────────────
 // API: لیست پلن‌های اشتراک
 // ──────────────────────────────────────────────────────────────────────────
-app.get("/api/subscription/plans", async (req, res) => {
-  const plans = await query(
-    `SELECT id, title, months, price, is_free, is_active, sort_order
-     FROM subscription_plans WHERE is_active = true ORDER BY sort_order ASC`,
-  );
+app.get("/api/subscription/plans", (req, res) => {
+  const plans = db.prepare(`
+    SELECT
+      id,
+      title,
+      months,
+      price,
+      is_free,
+      is_active,
+      sort_order
+    FROM subscription_plans
+    WHERE is_active = 1
+    ORDER BY sort_order ASC
+  `).all();
+
   return res.json(plans);
 });
 
+
+
+
 app.post("/api/payment/create", verifyToken, async (req: any, res) => {
+
   const { plan } = req.body;
+
   let amount = 0;
+
   switch (plan) {
-    case "3months": amount = 890000; break;
-    case "6months": amount = 1590000; break;
-    case "1year": amount = 2790000; break;
-    default: return res.status(400).json({ message: "پلن نامعتبر است." });
+
+    case "3months":
+      amount = 890000;
+      break;
+
+    case "6months":
+      amount = 1590000;
+      break;
+
+    case "1year":
+      amount = 2790000;
+      break;
+
+    default:
+      return res.status(400).json({
+        message: "پلن نامعتبر است."
+      });
+
   }
 
   try {
-    const response = await fetch("https://payment.zarinpal.com/pg/v4/payment/request.json", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        merchant_id: process.env.ZARINPAL_MERCHANT_ID,
-        amount,
-        description: `اشتراک ${plan}`,
-        callback_url: `${process.env.BASE_URL}/api/payment/verify?plan=${plan}`,
-      }),
-    });
-    const result = await response.json();
-    const authority = result.data.authority;
-    return res.json({ url: `https://payment.zarinpal.com/pg/StartPay/${authority}` });
+
+      const response = await fetch(
+        "https://payment.zarinpal.com/pg/v4/payment/request.json",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            merchant_id: process.env.ZARINPAL_MERCHANT_ID,
+            amount,
+            description: `اشتراک ${plan}`,
+            callback_url: `${process.env.BASE_URL}/api/payment/verify?plan=${plan}`,
+          }),
+        }
+      );
+
+      const result = await response.json();
+
+      const authority = result.data.authority;
+
+      return res.json({
+        url: `https://payment.zarinpal.com/pg/StartPay/${authority}`,
+      });
+
   } catch (err) {
+
     console.log(err);
-    res.status(500).json({ message: "خطا در ایجاد پرداخت" });
+
+    res.status(500).json({
+      message: "خطا در ایجاد پرداخت"
+    });
+
   }
+
 });
+
+
+
+
+// app.post("/api/payment/card-to-card", verifyToken, (req: any, res) => {
+
+//   const { plan, amount } = req.body;
+
+//   console.log("درخواست کارت به کارت:", {
+//     userId: req.user.id,
+//     plan,
+//     amount
+//   });
+
+//   res.json({
+//     success: true,
+//     message: "درخواست ثبت شد."
+//   });
+
+// });
+
+// app.post("/api/payment/card-to-card", verifyToken, (req: any, res) => {
+
+//   return res.json({
+//     success: true
+//   });
+
+// });
+
 
 app.post(
   "/api/payment/card-to-card",
   verifyToken,
   receiptUpload.single("receipt"),
-  async (req: any, res: any) => {
-    try {
-      const { plan, amount } = req.body;
-      const receiptImage = req.file ? `/uploads/receipts/${req.file.filename}` : "";
+  (req: any, res: any) => {
 
-      await execute(
-        `INSERT INTO subscription_purchases (
-           id, username, plan, duration_months, amount, payment_method,
-           payment_status, transaction_id, receipt_image, description,
-           created_at, approved_at, approved_by
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-        [
-          crypto.randomUUID(),
-          req.user.username,
-          plan,
-          plan === "3months" ? 3 : plan === "6months" ? 6 : plan === "12months" ? 12 : 0,
-          amount,
-          "card",
-          "pending",
-          "",
-          receiptImage,
-          "پرداخت کارت به کارت",
-          new Date().toISOString(),
-          "",
-          "",
-        ],
-      );
+      console.log("BODY:", req.body);
+  console.log("FILE:", req.file);
+  console.log("USER:", req.user);
 
-      return res.json({ success: true, message: "درخواست ثبت شد." });
-    } catch (err) {
-      console.error(err);
-      return res.status(500).json({ success: false, error: String(err) });
-    }
-  },
-);
+  try {
+
+    const { plan, amount } = req.body;
+
+    const receiptImage = req.file
+  ? `/uploads/receipts/${req.file.filename}`
+  : "";
+
+
+  console.log(req.file);
+console.log(receiptImage);
+
+    db.prepare(`
+      INSERT INTO subscription_purchases (
+        id,
+        username,
+        plan,
+        duration_months,
+        amount,
+        payment_method,
+        payment_status,
+        transaction_id,
+        receipt_image,
+        description,
+        created_at,
+        approved_at,
+        approved_by
+      )
+      VALUES (
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      )
+    `).run(
+
+      crypto.randomUUID(),
+
+      req.user.username,
+
+      plan,
+
+      plan === "3months"
+        ? 3
+        : plan === "6months"
+        ? 6
+        : plan === "12months"
+        ? 12
+        : 0,
+
+      amount,
+
+      "card",
+
+      "pending",
+
+      "",          // transaction_id
+
+      receiptImage, // receipt_image
+
+      "پرداخت کارت به کارت",
+
+      new Date().toISOString(),
+
+      "",
+
+      ""
+
+    );
+
+    return res.json({
+      success: true,
+      message: "درخواست ثبت شد."
+    });
+
+  } catch (err) {
+  console.error(err);
+
+  return res.status(500).json({
+    success: false,
+    error: String(err)
+  });
+}
+
+});
+
+
+
+
 
 app.post(
   "/api/admin/subscription-purchases/:id/delete",
   verifyAdmin,
-  async (req, res) => {
-    const purchase = await queryOne<any>(`SELECT * FROM subscription_purchases WHERE id=$1`, [req.params.id]);
-    if (!purchase) return res.status(404).json({ success: false });
+  (req, res) => {
 
-    if (purchase.receipt_image) {
-      const filePath = path.join(UPLOADS_DIR, purchase.receipt_image.replace("/uploads/", ""));
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    const purchase = db.prepare(`
+      SELECT *
+      FROM subscription_purchases
+      WHERE id=?
+    `).get(req.params.id) as any;
+
+    if (!purchase) {
+      return res.status(404).json({
+        success: false
+      });
     }
 
-    await execute(`DELETE FROM subscription_purchases WHERE id=$1`, [req.params.id]);
-    res.json({ success: true });
-  },
-);
+    if (purchase.receipt_image) {
+
+      const filePath = path.join(
+        UPLOADS_DIR,
+        purchase.receipt_image.replace("/uploads/", "")
+      );
+
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+
+    }
+
+    db.prepare(`
+      DELETE FROM subscription_purchases
+      WHERE id=?
+    `).run(req.params.id);
+
+    res.json({
+      success: true
+    });
+
+  }   // ← این براکت جا افتاده بود
+
+);    // ← و این هم جا افتاده بود
+
 
 // ─── Bootstrap ────────────────────────────────────────────────────────────────
 async function bootstrap() {
-  await applySchema();
+  // باید قبل از پذیرش هر درخواستی، حساب ادمین (در صورت نبود) ساخته شده باشد
   await seedAdminUser();
-  await seedInitialData();
 
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({ server: { middlewareMode: true }, appType: "spa" });
