@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS users (
   qr_request_time    TEXT NOT NULL DEFAULT '',
   qr_approved_at     TEXT NOT NULL DEFAULT '',
   card_data          JSONB NOT NULL DEFAULT '{}'::jsonb,
-  created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  card_updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS tickets (
@@ -123,6 +124,10 @@ CREATE TABLE IF NOT EXISTS visit_stats (
   PRIMARY KEY (username, granularity, period)
 );
 CREATE INDEX IF NOT EXISTS idx_visit_stats_period ON visit_stats(granularity, period);
+
+-- مهاجرت برای دیتابیس‌های از قبل موجود (چون CREATE TABLE IF NOT EXISTS ستون جدید
+-- را به جدول موجود اضافه نمی‌کند). برای رصد آخرین ویرایش کارت (سرویس card-server).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS card_updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
 
 -- شمارنده‌های تجمعی همه‌دوره (معادل stats.totalVisits/scans/linkOpens/buttonClicks قدیمی)
 -- تا برای نمایش «کل بازدید» مجبور به SUM روی کل visit_stats نباشیم.

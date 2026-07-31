@@ -716,9 +716,18 @@ app.post("/api/user/card/:username", verifyToken, async (req: any, res) => {
   // آمار قفل می‌شه — کاربر نمی‌تونه دستکاری کنه (آمار واقعی از visit_stats/visit_totals می‌آید)
   const newCardData = { ...req.body, stats: user.cardData.stats };
   await execute(
-    `UPDATE users SET card_data=$1 WHERE LOWER(username)=LOWER($2)`,
+    `UPDATE users SET card_data=$1, card_updated_at=now() WHERE LOWER(username)=LOWER($2)`,
     [JSON.stringify(newCardData), req.params.username],
   );
+
+  // اطلاع به card-server برای invalidate کردن کش HTML این کاربر (best-effort،
+  // نباید ذخیره‌سازی کارت را کند یا ناموفق کند اگر card-server در دسترس نبود)
+  if (process.env.CARD_SERVER_URL && process.env.INTERNAL_SECRET) {
+    fetch(`${process.env.CARD_SERVER_URL}/internal/invalidate/${req.params.username}`, {
+      method: "POST",
+      headers: { "x-internal-secret": process.env.INTERNAL_SECRET },
+    }).catch(() => { /* silent — یک TTL کوتاه در card-server خودش هم این را جبران می‌کند */ });
+  }
   return res.json({ message: "کارت با موفقیت ذخیره شد.", cardData: newCardData });
 });
 

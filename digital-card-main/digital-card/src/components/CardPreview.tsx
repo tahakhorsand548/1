@@ -210,6 +210,7 @@ export default function CardPreview({ data, username, isPreview = false }: CardP
             <div className="flex justify-end items-center relative z-10">
               <button 
                 onClick={() => setLocalIsDark(!localIsDark)}
+                data-dark-toggle="true"
                 className={`w-9 h-9 backdrop-blur-md rounded-full flex items-center justify-center shadow-sm hover:scale-105 transition-transform ${mode("bg-white/70 text-gray-700", "bg-gray-800/70 text-gray-300")}`}
               >
                 {localIsDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
@@ -273,6 +274,8 @@ export default function CardPreview({ data, username, isPreview = false }: CardP
                         <button
                           key={`landline-${idx}`}
                           onClick={() => handleInteraction("landline", `tel:${l}`)}
+                          data-track-type="landline"
+                          data-track-url={`tel:${l}`}
                           className={`text-xs font-bold tracking-wider hover:text-blue-600 transition-colors text-right ${mode("text-gray-800", "text-gray-200")}`}
                           dir="ltr"
                         >
@@ -297,6 +300,8 @@ export default function CardPreview({ data, username, isPreview = false }: CardP
                         <button
                           key={`phone-${idx}`}
                           onClick={() => handleInteraction("phone", `tel:${p}`)}
+                          data-track-type="phone"
+                          data-track-url={`tel:${p}`}
                           className={`text-xs font-bold tracking-wider hover:text-blue-600 transition-colors text-right ${mode("text-gray-800", "text-gray-200")}`}
                           dir="ltr"
                         >
@@ -313,6 +318,8 @@ export default function CardPreview({ data, username, isPreview = false }: CardP
                   <hr className={`opacity-60 mt-4 mb-3 transition-colors ${mode("border-gray-100", "border-gray-700")}`} />
                   <button
                     onClick={() => handleInteraction("website", website)}
+                    data-track-type="website"
+                    data-track-url={website}
                     className="w-full text-white rounded-2xl py-3 flex justify-center items-center gap-2 text-[13px] font-bold transition-colors shadow-md hover:brightness-110"
                     style={{ backgroundColor: themeHex }}
                   >
@@ -339,7 +346,7 @@ export default function CardPreview({ data, username, isPreview = false }: CardP
                       </p>
                       <div className="flex justify-center gap-3 w-full">
                         {b.balad && (
-                      <button onClick={() => handleInteraction("balad", b.balad)} className="flex flex-1 justify-center">
+                      <button onClick={() => handleInteraction("balad", b.balad)} data-track-type="balad" data-track-url={b.balad} className="flex flex-1 justify-center">
                           <div className={`w-17 h-17 rounded-xl shadow-card flex flex-col items-center justify-center gap-1 transition-colors overflow-hidden ${mode("bg-white hover:bg-gray-50", "bg-gray-700 hover:bg-gray-600")}`}>
                             <img 
                               src={baladIcon} 
@@ -351,7 +358,7 @@ export default function CardPreview({ data, username, isPreview = false }: CardP
                       </button>
                         )}
                         {b.neshan && (
-                          <button onClick={() => handleInteraction("neshan", b.neshan)} className="flex flex-1 justify-center">
+                          <button onClick={() => handleInteraction("neshan", b.neshan)} data-track-type="neshan" data-track-url={b.neshan} className="flex flex-1 justify-center">
                             <div className={`w-17 h-17 rounded-xl shadow-card flex flex-col items-center justify-center gap-2 transition-colors ${mode("bg-white hover:bg-gray-50", "bg-gray-700 hover:bg-gray-600")}`}>
                             <img 
                               src={nashanIcon} 
@@ -363,7 +370,7 @@ export default function CardPreview({ data, username, isPreview = false }: CardP
                           </button>
                         )}
                         {b.googleMaps && (
-                          <button onClick={() => handleInteraction("googleMaps", b.googleMaps)} className="flex flex-1 justify-center">
+                          <button onClick={() => handleInteraction("googleMaps", b.googleMaps)} data-track-type="googleMaps" data-track-url={b.googleMaps} className="flex flex-1 justify-center">
                             <div className={`w-17 h-17 rounded-xl shadow-card flex flex-col items-center justify-center gap-2 transition-colors ${mode("bg-white hover:bg-gray-50", "bg-gray-700 hover:bg-gray-600")}`}>
                             <img 
                               src={googlemapIcon} 
@@ -440,6 +447,8 @@ export default function CardPreview({ data, username, isPreview = false }: CardP
                       <button
                         key={key}
                         onClick={() => handleInteraction(key, val)}
+                        data-track-type={key}
+                        data-track-url={val}
                         className="flex flex-col items-center gap-2 snap-center shrink-0 group"
                       >
                         <div className={`w-11 h-11 rounded-full flex items-center justify-center shadow-md group-hover:scale-105 transition-transform ${btnClass}`}>
@@ -468,6 +477,8 @@ export default function CardPreview({ data, username, isPreview = false }: CardP
                       <button
                         key={`prod-${idx}`}
                         onClick={() => p.link && handleInteraction("product", p.link)}
+                        data-track-type={p.link ? "product" : undefined}
+                        data-track-url={p.link || undefined}
                         className={`carousel-item opacity-100 scale-100 rounded-2xl shadow-card p-2 flex flex-col items-center snap-center shrink-0 w-44 border transition-colors hover:scale-95 duration-300 text-right ${productCardClass}`}
                       >
                         <div className={`w-full h-32 rounded-xl overflow-hidden mb-3 relative ${mode("bg-gray-50", "bg-gray-900")}`}>
