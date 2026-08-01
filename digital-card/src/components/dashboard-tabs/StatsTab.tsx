@@ -3,6 +3,7 @@ import { Copy, ExternalLink, Crown, RefreshCw } from "lucide-react";
 import { CardData, User, AdvertisingBanner } from "../../types";
 import { SubscriptionInfo } from "../../hooks/useSubscription";
 import VisitsChart from "./VisitsChart";
+import { getCardUrl } from "../../utils/cardLink";
 
 interface StatsTabProps {
   user: User;
@@ -79,23 +80,19 @@ export default function StatsTab({
                 آدرس آنلاین عمومی کارت ویزیت هوشمند شما :
               </p>
               <span className="text-sm font-semibold text-blue-600 font-mono mt-1 block">
-                {`${window.location.origin}/card/${user.username}`}
+                {getCardUrl(user.username)}
               </span>
             </div>
             <div className="flex gap-2">
               <button
-                onClick={() =>
-                  handleCopyLink(
-                    `${window.location.origin}/card/${user.username}`,
-                  )
-                }
+                onClick={() => handleCopyLink(getCardUrl(user.username))}
                 className="py-2.5 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition flex items-center gap-1.5"
               >
                 <Copy className="w-4 h-4" />
                 کپی لینک
               </button>
               <a
-                href={`/card/${user.username}`}
+                href={getCardUrl(user.username)}
                 target="_blank"
                 rel="noreferrer"
                 className="py-2.5 px-5 rounded-xl bg-blue-600 hover:bg-blue-700 hover:shadow-lg hover:shadow-blue-500/10 text-white text-xs font-bold transition flex items-center gap-2"

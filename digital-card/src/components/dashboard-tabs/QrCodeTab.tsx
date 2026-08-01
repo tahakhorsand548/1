@@ -1,6 +1,7 @@
 import React from "react";
 import { Clock, Info, Download } from "lucide-react";
 import { User } from "../../types";
+import { getCardUrl } from "../../utils/cardLink";
 
 interface QrCodeTabProps {
   user: User;
@@ -129,14 +130,10 @@ export default function QrCodeTab({
                 </span>
                 <div className="flex gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
                   <span className="text-xs text-blue-600 font-mono font-semibold flex-1 select-all overflow-x-auto truncate text-left pt-1">
-                    {`${window.location.origin}/card/${user.username}`}
+                    {getCardUrl(user.username)}
                   </span>
                   <button
-                    onClick={() =>
-                      handleCopyLink(
-                        `${window.location.origin}/card/${user.username}`,
-                      )
-                    }
+                    onClick={() => handleCopyLink(getCardUrl(user.username))}
                     className="py-1 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[10px] font-bold shadow-xs cursor-pointer"
                   >
                     کپی

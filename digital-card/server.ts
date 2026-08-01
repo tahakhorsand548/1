@@ -193,19 +193,6 @@ function isLegacyHash(storedHash: string): boolean {
   return !!storedHash && storedHash.startsWith("pbkdf2$");
 }
 
-// ─── تاریخ جلالی ─────────────────────────────────────────────────────────────
-function getJalaliDate(date: Date): string {
-  return new Intl.DateTimeFormat("fa-IR", { month: "short", day: "numeric" } as const).format(date);
-}
-
-// ─── کلیدهای تاریخ/ساعت به فرم ISO (برای ذخیره‌سازی قابل‌مرتب‌سازی و قابل‌محاسبه) ──
-function isoDateKey(date: Date): string {
-  return date.toISOString().slice(0, 10); // YYYY-MM-DD
-}
-function isoHourKey(date: Date): string {
-  return date.toISOString().slice(0, 13); // YYYY-MM-DDTHH
-}
-
 // ─── داده پیش‌فرض کارت ───────────────────────────────────────────────────────
 function createDefaultCardData(brandName: string) {
   return {
@@ -349,43 +336,10 @@ async function getUserSubscription(username: string): Promise<any | null> {
   return sub;
 }
 
-// ─── تاریخچه بازدید (visit_stats/visit_totals) ────────────────────────────────
-// یک بازدید/کلیک را در جدول‌های visit_totals (مجموع کلی) و visit_stats
-// (سطل‌های روزانه/ساعتی) با یک UPSERT سبک ثبت می‌کند.
-async function recordVisitEvent(
-  username: string,
-  deltas: { visits?: number; scans?: number; linkOpens?: number; buttonClicks?: number },
-) {
-  const v = deltas.visits || 0;
-  const s = deltas.scans || 0;
-  const l = deltas.linkOpens || 0;
-  const b = deltas.buttonClicks || 0;
-
-  await execute(
-    `INSERT INTO visit_totals (username, total_visits, scans, link_opens, button_clicks)
-     VALUES ($1,$2,$3,$4,$5)
-     ON CONFLICT (username) DO UPDATE SET
-       total_visits = visit_totals.total_visits + $2,
-       scans = visit_totals.scans + $3,
-       link_opens = visit_totals.link_opens + $4,
-       button_clicks = visit_totals.button_clicks + $5`,
-    [username, v, s, l, b],
-  );
-
-  const now = new Date();
-  for (const [granularity, period] of [["day", isoDateKey(now)], ["hour", isoHourKey(now)]] as const) {
-    await execute(
-      `INSERT INTO visit_stats (username, granularity, period, visits, scans, link_opens, button_clicks)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)
-       ON CONFLICT (username, granularity, period) DO UPDATE SET
-         visits = visit_stats.visits + $4,
-         scans = visit_stats.scans + $5,
-         link_opens = visit_stats.link_opens + $6,
-         button_clicks = visit_stats.button_clicks + $7`,
-      [username, granularity, period, v, s, l, b],
-    );
-  }
-}
+// نکته: نوشتن آمار بازدید/کلیک (visit_stats/visit_totals) دیگر اینجا انجام
+// نمی‌شود — چون صفحه‌ی عمومی کارت به card-server منتقل شده و همان‌جا مستقیماً
+// این جدول‌ها را می‌نویسد. اینجا فقط برای نمایش در پیشخوان کاربر می‌خوانیمشان
+// (تابع buildFullStats پایین‌تر).
 
 /** ساخت شیء stats کامل (مجموع + تاریخچه روزانه/ساعتی) برای نمایش در پیشخوان کاربر */
 async function buildFullStats(username: string) {
@@ -674,29 +628,10 @@ app.post("/api/auth/reset-password", async (req, res) => {
 });
 
 // ─── Card Routes ──────────────────────────────────────────────────────────────
-app.get("/api/card/:username", async (req, res) => {
-  const source = (req.query.source as string) || "link";
-  const user   = await getUser(req.params.username);
-  if (!user) return res.status(404).json({ message: "کارت ویزیت یافت نشد." });
-  if (user.isSuspended) return res.status(403).json({ message: "این کارت به دلیل تعلیق حساب غیرفعال است.", isSuspended: true });
-
-  await recordVisitEvent(user.username, {
-    visits: 1,
-    scans: source === "scan" ? 1 : 0,
-    linkOpens: source === "scan" ? 0 : 1,
-  });
-
-  return res.json({ fullName: user.fullName, username: user.username, cardData: user.cardData });
-});
-
-app.post("/api/card/:username/click", async (req, res) => {
-  const user = await getUser(req.params.username);
-  if (!user) return res.status(404).json({ message: "کاربر یافت نشد." });
-
-  await recordVisitEvent(user.username, { buttonClicks: 1 });
-
-  return res.json({ success: true });
-});
+// نکته: مسیر عمومی نمایش کارت (و بازدید/کلیک آن) دیگر اینجا سرو نمی‌شود —
+// این مسئولیت به‌طور کامل به سرویس مستقل card-server (card.youkart.ir) منتقل
+// شده که مستقیماً از همین دیتابیس می‌خواند/می‌نویسد. این دو endpoint قبلاً فقط
+// توسط PublicCardPage (مسیر حذف‌شده‌ی /card/:username) استفاده می‌شدند.
 
 app.get("/api/user/card/:username", verifyToken, async (req: any, res) => {
   if (req.username !== req.params.username && req.username !== "admin")

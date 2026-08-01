@@ -6,17 +6,16 @@ import {
   Navigate,
   useNavigate,
   useParams,
-  useLocation,
 } from "react-router-dom";
 import AuthPages from "./components/AuthPages";
 import UserDashboard from "./components/UserDashboard";
 import AdminPanel from "./components/AdminPanel";
-import CardPreview from "./components/CardPreview";
 import ProEditorPage from "./components/ProEditorPage";
 import { User } from "./types";
-import { ShieldCheck, RefreshCw, QrCode, Globe, Info, CreditCard, Flame } from "lucide-react";
+import { ShieldCheck, RefreshCw, QrCode, Globe, CreditCard, Flame } from "lucide-react";
 import { apiFetch, removeAuthToken, setAuthToken } from "./utils/api";
 import { useSubscription } from "./hooks/useSubscription";
+import { getCardUrl } from "./utils/cardLink";
 import logo from "../img/logo/logo-full.png";
 
 // ─── Context برای اشتراک‌گذاری session بین همه صفحات ───────────────────────
@@ -87,7 +86,6 @@ function AppContent() {
     <AuthContext.Provider value={{ currentUser, sessionLoading, checkActiveSession, handleLoginSuccess, handleLogout }}>
       <Routes>
         <Route path="/" element={<LandingPage />} />
-        <Route path="/card/:username" element={<PublicCardPage />} />
         <Route path="/dashboard/:username" element={<DashboardRoute />} />
         <Route path="/dashboard/:username/:tab" element={<DashboardRoute />} />
         <Route path="/editor-pro/:username" element={<ProEditorRoute />} />
@@ -96,52 +94,6 @@ function AppContent() {
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </AuthContext.Provider>
-  );
-}
-
-// ─── صفحه عمومی کارت ─────────────────────────────────────────────────────────
-function PublicCardPage() {
-  const { username } = useParams<{ username: string }>();
-  const [cardData, setCardData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const navigate = useNavigate();
-  const location = useLocation();
-
-  useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const source = params.get("source") || "link";
-    apiFetch(`/api/card/${username}?source=${source}`)
-      .then(async res => {
-        const data = await res.json();
-        if (res.ok) setCardData(data);
-        else setError(data.message || "کارت یافت نشد.");
-      })
-      .catch(() => setError("خطای شبکه."))
-      .finally(() => setLoading(false));
-  }, [username]);
-
-  if (loading) return <LoadingScreen text="در حال دریافت کارت ویزیت دیجیتال..." />;
-
-  if (error) return (
-    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
-      <div className="w-14 h-14 rounded-full bg-red-100 flex items-center justify-center text-red-600 mb-4">
-        <Info className="w-8 h-8" />
-      </div>
-      <h2 className="text-lg font-black text-slate-900">خطا در بارگذاری کارت</h2>
-      <p className="text-xs text-slate-500 mt-2 max-w-sm leading-relaxed">{error}</p>
-      <button onClick={() => navigate("/")} className="mt-6 py-2 px-5 rounded-lg bg-blue-600 text-white font-bold text-xs">
-        ورود به سایت کارتت
-      </button>
-    </div>
-  );
-
-  return (
-    <div className="min-h-screen bg-slate-100 flex justify-center items-center p-0 md:p-6">
-      <div className="w-full max-w-md md:max-w-md h-full md:min-h-[850px] md:max-h-[90%] md:rounded-[40px] md:border-8 md:border-slate-900 md:shadow-2xl overflow-hidden relative scrollbar-none bg-white">
-        <CardPreview data={cardData.cardData} username={cardData.username} isPreview={false} />
-      </div>
-    </div>
   );
 }
 
@@ -358,7 +310,7 @@ function LandingPage() {
             >
               همین حالا رایگان بسازید!
             </button>
-            <a href="/card/admin" className="py-3.5 px-6 rounded-xl bg-white border border-slate-200 text-slate-705 font-bold text-xs hover:bg-slate-50 transition-all flex items-center gap-2 shadow-sm">
+            <a href={getCardUrl("admin")} target="_blank" rel="noreferrer" className="py-3.5 px-6 rounded-xl bg-white border border-slate-200 text-slate-705 font-bold text-xs hover:bg-slate-50 transition-all flex items-center gap-2 shadow-sm">
               <Globe className="w-4 h-4 text-blue-650" />
               مشاهده دمو کارت ها 
             </a>

@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { User, Ticket, GlobalAnnouncement } from "../types";
 import { apiFetch, setAuthToken } from "../utils/api";
+import { getCardUrl } from "../utils/cardLink";
 import QRCode from "qrcode";
 import { Trash2 } from "lucide-react";
 import VisitsChart from "./dashboard-tabs/VisitsChart";
@@ -501,7 +502,7 @@ const filteredUsers = usersList.filter((u) => {
     if (!selectedQrUser) return;
     setSimulatingUpload(true);
     try {
-      const url = `${window.location.origin}/card/${selectedQrUser.username}?source=scan`;
+      const url = getCardUrl(selectedQrUser.username, { source: "scan" });
 
       // ساخت QR در همین مرورگر — هیچ درخواستی به سرویس خارجی نمی‌ره
       const dataUrl = await QRCode.toDataURL(url, {
@@ -1521,10 +1522,10 @@ const filteredUsers = usersList.filter((u) => {
                         <span className="text-xs text-slate-400 mt-1 block">
                           لینک کارت کاربر:{" "}
                           <a
-                            href={`/card/${selectedQrUser.username}`}
+                            href={getCardUrl(selectedQrUser.username)}
                             target="_blank"
                             className="text-blue-400 underline"
-                          >{`${window.location.host}/card/${selectedQrUser.username}`}</a>
+                          >{getCardUrl(selectedQrUser.username)}</a>
                         </span>
                       </div>
 
@@ -2696,11 +2697,11 @@ const filteredUsers = usersList.filter((u) => {
                   <span className="text-xs text-slate-400 mt-1 block">
                     لینک کارت کاربر:{" "}
                     <a
-                      href={`/card/${editingUser.username}`}
+                      href={getCardUrl(editingUser.username)}
                       target="_blank"
                       rel="noreferrer"
                       className="text-blue-400 underline"
-                    >{`${window.location.host}/card/${editingUser.username}`}</a>
+                    >{getCardUrl(editingUser.username)}</a>
                   </span>
                   <span className="text-[10px] text-slate-500 mt-1 block">
                     وضعیت فعلی:{" "}
