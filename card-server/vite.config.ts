@@ -4,20 +4,17 @@ import path from "path";
 import { defineConfig } from "vite";
 
 // ─── Vite config سرویس card-server ───────────────────────────────────────────
-// این پروژه کاملاً مستقل است و هیچ وابستگی‌ای به داشبورد/ادمین/ادیتور ندارد.
-// فقط کامپوننت CardPreview.tsx (و وابستگی‌های خودش) را از پروژه اصلی import
-// می‌کند تا ظاهر کارت دقیقاً همانی باشد که همین حالا در /card/:username است.
+// این پروژه کاملاً مستقل و خودکفاست — هیچ وابستگی‌ای به پوشه‌ی دیگری (داشبورد/
+// ادمین/ادیتور یا حتی پروژه اصلی digital-card) ندارد. کامپوننت CardPreview.tsx
+// و وابستگی‌های خودش (types.ts، utils/api.ts، لوگوها، index.css) به‌صورت فیزیکی
+// داخل همین پوشه (src/) کپی شده‌اند تا build کاملاً مستقل انجام شود؛ حتی اگر
+// پوشه‌ی دیگری کنارش نباشد هم باید بدون خطا build/اجرا شود.
 //
 // دو build جدا اجرا می‌شود (هر دو با همین فایل config):
 //   npm run build:client → یک بسته‌ی CSS/JS سبک برای مرورگر (فقط استایل + enhance.js دستی)
 //   npm run build:ssr    → باندل SSR قابل‌ایمپورت در Node (entry-server.tsx)
 export default defineConfig(({ isSsrBuild }) => ({
   plugins: [react(), tailwindcss()],
-  resolve: {
-    alias: {
-      "@main": path.resolve(__dirname, "../digital-card/src"),
-    },
-  },
   build: isSsrBuild
     ? {
         // بیلد SSR: فقط entry-server.tsx به یک ماژول Node-قابل-ایمپورت تبدیل می‌شود

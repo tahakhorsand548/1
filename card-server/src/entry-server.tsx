@@ -1,7 +1,7 @@
 import React from "react";
 import ReactDOMServer from "react-dom/server";
-import CardPreview from "@main/components/CardPreview";
-import type { CardData } from "@main/types";
+import CardPreview from "./components/CardPreview";
+import type { CardData } from "./types";
 
 export interface RenderedCard {
   lightHtml: string;
