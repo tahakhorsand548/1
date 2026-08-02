@@ -1,5 +1,7 @@
 /**
- * Shared Type Definitions
+ * تایپ‌های مربوط به رندر ظاهری کارت — این‌ها تنها چیزی هستند که CardPreview.tsx
+ * و MinimalistCard.tsx به آن نیاز دارند. تایپ‌های دیگر پروژه (User، Ticket، ...)
+ * اینجا نیستند و در digital-card/src/types.ts باقی می‌مانند.
  */
 
 export interface Branch {
@@ -83,58 +85,4 @@ export interface CardData {
   workingDays: WorkingDays;
   design: CardDesign;
   stats: CardStats;
-}
-
-export interface User {
-  fullName: string;
-  username: string;
-  email: string;
-  phone: string;
-  isSuspended: boolean;
-  qrRequestStatus: 'none' | 'pending' | 'approved';
-  qrImageUrl: string;
-  cardData?: CardData;
-}
-
-export interface TicketMessage {
-  id: string;
-  sender: 'user' | 'support';
-  message: string;
-  createdAt: string;
-  /** زمان دقیق پیام به‌صورت epoch ms (برای مرتب‌سازی/محاسبه خوانده‌نشده) */
-  ts?: number;
-  /** آدرس تصویر پیوست‌شده — فقط ادمین می‌تواند این را ارسال کند */
-  attachment?: string;
-}
-
-export interface Ticket {
-  id: string;
-  username: string;
-  userFullName: string;
-  title: string;
-  description: string;
-  status: 'read' | 'under_review' | 'ended';
-  createdAt: string;
-  messages: TicketMessage[];
-  /** زمان آخرین پیام (ISO) — مبنای مرتب‌سازی تیکت‌ها مثل یک پیام‌رسان */
-  lastMessageAt?: string;
-  /** آخرین باری که ادمین این تیکت را باز/مشاهده کرده (ISO) */
-  adminLastReadAt?: string;
-}
-
-export interface GlobalAnnouncement {
-  id: string;
-  title: string;
-  description: string;
-  image: string;
-  createdAt: string;
-}
-
-export interface AdvertisingBanner {
-  id: string;
-  imageUrl: string;
-  title: string;
-  link?: string;
-  /** فقط برای اسلات ویدیوی آموزشی (id === 'training_video') استفاده می‌شود */
-  videoUrl?: string;
 }

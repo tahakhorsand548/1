@@ -1,7 +1,7 @@
 import type { CardUserRow } from "./db";
 
 // آدرس پایه‌ی سرور اصلی برای بارگذاری تصاویر از همان /uploads (بدون کپی فایل)
-const UPLOADS_BASE_URL = process.env.UPLOADS_BASE_URL || "https://youkart.ir";
+export const UPLOADS_BASE_URL = process.env.UPLOADS_BASE_URL || "https://youkart.ir";
 const SITE_BASE_URL = process.env.SITE_BASE_URL || "https://card.youkart.ir";
 
 function absoluteImageUrl(url?: string): string {
@@ -75,8 +75,8 @@ ${ogImage ? `<meta name="twitter:image" content="${escapeHtml(ogImage)}">` : ""}
 <script type="application/ld+json">${JSON.stringify(structuredData)}</script>
 </head>
 <body>
-<div id="card-light">${rendered.lightHtml}</div>
-<div id="card-dark" style="display:none">${rendered.darkHtml}</div>
+<div id="card-light"${cd.design?.isDark ? ' style="display:none"' : ""}>${rendered.lightHtml}</div>
+<div id="card-dark"${cd.design?.isDark ? "" : ' style="display:none"'}>${rendered.darkHtml}</div>
 <script src="/enhance.js" defer></script>
 </body>
 </html>`;

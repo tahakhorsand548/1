@@ -4,7 +4,7 @@ import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
 import { getUserForCard, isUserPro, getActiveProUsers, recordCardVisit, recordCardClick } from "./db";
-import { buildCardPage, buildNotFoundPage } from "./render";
+import { buildCardPage, buildNotFoundPage, UPLOADS_BASE_URL } from "./render";
 import { TtlCache } from "./cache";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -34,7 +34,7 @@ app.use(express.static(path.join(ROOT, "public")));
 const pageCache = new TtlCache<string>(60_000);
 
 // ─── ماژول SSR بیلدشده (npm run build:ssr) به‌صورت پویا import می‌شود ─────────
-let renderCardFn: ((data: any, username: string) => { lightHtml: string; darkHtml: string }) | null = null;
+let renderCardFn: ((data: any, username: string, imageBaseUrl: string) => { lightHtml: string; darkHtml: string }) | null = null;
 async function getRenderCard() {
   if (renderCardFn) return renderCardFn;
   const ssrEntry = path.join(ROOT, "dist-ssr", "entry-server.js");
@@ -78,7 +78,7 @@ app.get("/:username", async (req, res, next) => {
     ]);
 
     const renderCard = await getRenderCard();
-    const rendered = renderCard(user.cardData, user.username);
+    const rendered = renderCard(user.cardData, user.username, UPLOADS_BASE_URL);
     const html = buildCardPage(user, rendered, { isPro, cssHref });
 
     pageCache.set(cacheKey, html);

@@ -12,12 +12,15 @@ import {
   Grid3x3,
 } from "lucide-react";
 import { CardData } from "../types";
+import { getTehranDayName } from "../utils/dayOfWeek";
 
 interface MinimalistCardProps {
   data: CardData;
   username: string;
   isPreview?: boolean;
   onInteraction: (type: string, url?: string) => void;
+  /** پیشوند مطلق برای تصاویر آپلودی — رجوع کنید به توضیح همین prop در CardPreview.tsx */
+  imageBaseUrl?: string;
 }
 
 /**
@@ -25,7 +28,7 @@ interface MinimalistCardProps {
  * تمام رنگ‌های طلایی ثابت (--gold) با themeHex (رنگ انتخابی از پنل) جایگزین شده‌اند.
  * تمام متن‌های ثابت با دیتای واقعی کارت جایگزین شده‌اند.
  */
-export default function MinimalistCard({ data, username, isPreview = false, onInteraction }: MinimalistCardProps) {
+export default function MinimalistCard({ data, username, isPreview = false, onInteraction, imageBaseUrl = "" }: MinimalistCardProps) {
   const {
     businessName,
     brandManager,
@@ -45,6 +48,12 @@ export default function MinimalistCard({ data, username, isPreview = false, onIn
 
   const themeHex = design?.colorTheme || "#c9a96e"; // پیش‌فرض همون رنگ طلایی طرح اصلی
   const isDark = design?.isDark ?? false;
+
+  const resolveImg = (path?: string): string => {
+    if (!path) return "";
+    if (/^https?:\/\//.test(path) || !imageBaseUrl) return path;
+    return `${imageBaseUrl}${path.startsWith("/") ? "" : "/"}${path}`;
+  };
 
   // ─── محاسبه رنگ‌های روشن‌تر/تیره‌تر از themeHex برای گرادینت و افکت‌ها ───
   const hexToRgba = (hex: string, alpha: number) => {
@@ -66,8 +75,8 @@ export default function MinimalistCard({ data, username, isPreview = false, onIn
 
   // ─── وضعیت باز/بسته امروز ───
   const getDayStatus = () => {
-    const daysWeek = ["جمعه", "شنبه", "یکشنبه", "دوشنبه", "سه شنبه", "چهارشنبه", "پنجشنبه"];
-    const todayStr = daysWeek[new Date().getDay()];
+    // نام روز هفته به وقت تهران (نه timezone سرور) — رفع باگ ترتیب/timezone
+    const todayStr = getTehranDayName();
     const today = workingDays?.[todayStr];
     if (!today || !today.isOpen || today.isClosed) {
       return { text: "امروز تعطیل است", isOpen: false };
@@ -118,7 +127,7 @@ export default function MinimalistCard({ data, username, isPreview = false, onIn
             position: "absolute",
             inset: 0,
             opacity: 0.18,
-            backgroundImage: data.bgImageUrl ? `url(${data.bgImageUrl})` : undefined,
+            backgroundImage: data.bgImageUrl ? `url(${resolveImg(data.bgImageUrl)})` : undefined,
             backgroundSize: "cover",
             backgroundPosition: "center",
           }}
@@ -140,7 +149,7 @@ export default function MinimalistCard({ data, username, isPreview = false, onIn
             }}
           >
             {logoUrl ? (
-              <img src={logoUrl} alt="لوگو" referrerPolicy="no-referrer" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              <img src={resolveImg(logoUrl)} alt="لوگو" referrerPolicy="no-referrer" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
             ) : (
               <span style={{ fontSize: 32, fontWeight: 800, color: "var(--gold)" }}>
                 {businessName ? businessName.charAt(0) : "B"}
@@ -270,7 +279,7 @@ export default function MinimalistCard({ data, username, isPreview = false, onIn
           <div style={{ margin: "0 14px 6px", position: "relative" }}>
             <div style={{ borderRadius: 14, overflow: "hidden", position: "relative", aspectRatio: "16/9" }}>
               <img
-                src={gallery[galleryIdx]}
+                src={resolveImg(gallery[galleryIdx])}
                 alt={`گالری ${galleryIdx + 1}`}
                 referrerPolicy="no-referrer"
                 style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", transition: "opacity .4s" }}
@@ -333,7 +342,7 @@ export default function MinimalistCard({ data, username, isPreview = false, onIn
               >
                 <div style={{ width: "100%", aspectRatio: "1", background: isDark ? "#1c1916" : "#f0ece3" }}>
                   {p.imageUrl && (
-                    <img src={p.imageUrl} alt={p.title} referrerPolicy="no-referrer" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    <img src={resolveImg(p.imageUrl)} alt={p.title} referrerPolicy="no-referrer" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                   )}
                 </div>
                 <div style={{ padding: "8px 9px 10px" }}>

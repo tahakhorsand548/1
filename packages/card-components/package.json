@@ -1,0 +1,16 @@
+{
+  "name": "@youkart/card-components",
+  "version": "1.0.0",
+  "private": true,
+  "description": "کامپوننت‌های مشترک رندر ظاهری کارت ویزیت (CardPreview, MinimalistCard) — مصرف‌شده هم توسط digital-card (پیش‌نمایش زنده در داشبورد/ادیتور) و هم توسط card-server (SSR در card.youkart.ir). تک منبع حقیقت برای ظاهر کارت؛ تغییرش را فقط اینجا انجام بده.",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "dependencies": {
+    "lucide-react": "^0.546.0"
+  }
+}

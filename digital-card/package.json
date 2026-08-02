@@ -18,6 +18,7 @@
     "@types/bcrypt": "^6.0.0",
     "@types/pg": "^8.20.0",
     "@vitejs/plugin-react": "^5.0.4",
+    "@youkart/card-components": "*",
     "bcrypt": "^6.0.0",
     "cookie-parser": "^1.4.7",
     "dotenv": "^17.2.3",

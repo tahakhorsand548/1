@@ -5,6 +5,7 @@
   "use strict";
 
   var username = location.pathname.replace(/^\/+/, "").split("/")[0];
+  var themeKey = "card-theme-" + username;
 
   function trackClick() {
     try {
@@ -37,19 +38,22 @@
       dark.style.display = showingDark ? "none" : "";
       light.style.display = showingDark ? "" : "none";
       try {
-        localStorage.setItem("card-theme", showingDark ? "light" : "dark");
+        localStorage.setItem(themeKey, showingDark ? "light" : "dark");
       } catch (err) {}
     }
   });
 
-  // اگر کاربر قبلاً حالت تاریک را انتخاب کرده بود، همان را نگه دار
+  // اگر همین کاربر (کارت) قبلاً در همین مرورگر حالت تاریک را دستی انتخاب
+  // کرده بود، همان را نگه دار — این کلید مخصوص همین یوزرنیم است، پس روی
+  // تمِ پیش‌فرض (سرورساید، بر اساس تنظیمات واقعی کارت) کارت‌های دیگر اثر نمی‌گذارد.
   try {
-    if (localStorage.getItem("card-theme") === "dark") {
+    var savedTheme = localStorage.getItem(themeKey);
+    if (savedTheme === "dark" || savedTheme === "light") {
       var l = document.getElementById("card-light");
       var d = document.getElementById("card-dark");
       if (l && d) {
-        l.style.display = "none";
-        d.style.display = "";
+        l.style.display = savedTheme === "dark" ? "none" : "";
+        d.style.display = savedTheme === "dark" ? "" : "none";
       }
     }
   } catch (e) {}

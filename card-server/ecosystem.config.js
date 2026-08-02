@@ -1,15 +1,25 @@
 // PM2 config برای سرویس مستقل card-server (card.youkart.ir)
 // این پردازه کاملاً جدا از پروژه اصلی digital-card اجرا می‌شود، روی پورت خودش.
 //
-// ── نحوه اجرا ────────────────────────────────────────────────────────────────
+// ⚠️ نکته مهم (بعد از راه‌اندازی پکیج مشترک @youkart/card-components):
+// این پروژه دیگر با «npm install» تنها داخل همین پوشه کار نمی‌کند — چون به
+// پکیج مشترک packages/card-components (که در ریشه‌ی مونوریپو قرار دارد)
+// وابسته است. باید از ریشه‌ی ریپو نصب شود:
+//
+// ── نحوه اجرا (روی VPS با PM2) ─────────────────────────────────────────────
+//   cd /path/to/repo-root          # نه داخل card-server!
+//   npm install                    # نصب هر سه workspace با هم (لینک‌های لازم ساخته می‌شود)
+//   npm run build --workspace=card-server
 //   cd card-server
-//   npm install
-//   npm run build          # می‌سازد: dist/assets/*.css و dist-ssr/entry-server.js
 //   pm2 start ecosystem.config.js --env production
 //   pm2 save
 //
-// بعد از هر تغییر در CardPreview.tsx (پروژه اصلی)، برای اعمال شدن روی این
-// سرویس هم باید دوباره `npm run build` و `pm2 restart card-server` اجرا شود.
+// بعد از هر تغییر در کامپوننت‌های ظاهری کارت، فایل مربوطه را داخل
+// packages/card-components/src/components ویرایش کنید (نه یک کپی محلی)،
+// سپس همان دستور build بالا + `pm2 restart card-server` را دوباره اجرا کنید.
+// اگر digital-card هم از این کامپوننت استفاده می‌کند (پیش‌نمایش داشبورد)،
+// آن را هم دوباره build/restart کنید تا هماهنگ بمانند.
+
 
 module.exports = {
   apps: [

@@ -1,0 +1,17 @@
+{
+  "name": "youkart-monorepo",
+  "private": true,
+  "version": "1.0.0",
+  "description": "مونوریپوی Youkart — شامل digital-card (اپ اصلی)، card-server (سرویس SSR کارت‌ها) و packages/card-components (کامپوننت‌های مشترک نمایش کارت).",
+  "workspaces": [
+    "digital-card",
+    "card-server",
+    "packages/card-components"
+  ],
+  "scripts": {
+    "dev:app": "npm run dev --workspace=digital-card",
+    "dev:card-server": "npm run dev --workspace=card-server",
+    "build:app": "npm run build --workspace=digital-card",
+    "build:card-server": "npm run build --workspace=card-server"
+  }
+}

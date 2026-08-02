@@ -5,7 +5,7 @@ import {
   Store, Image as ImageIcon
 } from "lucide-react";
 import { CardData } from "../types";
-import { apiFetch } from "../utils/api";
+import { getTehranDayName } from "../utils/dayOfWeek";
 import baladIcon from './img card/logos/images.png';
 import nashanIcon from './img card/logos/images (1).png';
 import googlemapIcon from './img card/logos/google map.png';
@@ -21,9 +21,18 @@ interface CardPreviewProps {
   data: CardData;
   username: string;
   isPreview?: boolean;
+  /**
+   * پیشوند مطلق برای تصاویر آپلودی (پروفایل/کاور/گالری/محصولات) که با
+   * مسیر نسبی /uploads/... در دیتابیس ذخیره شده‌اند. در داشبورد پروژه اصلی
+   * (که هم‌دامنه با آپلودهاست) خالی می‌ماند (پیش‌فرض). در card-server که
+   * روی یک ساب‌دامین جدا (card.youkart.ir) سرو می‌شود، باید آدرس کامل
+   * سرور اصلی (مثلاً https://youkart.ir) پاس داده شود، وگرنه تصاویر
+   * شکسته نمایش داده می‌شوند.
+   */
+  imageBaseUrl?: string;
 }
 
-export default function CardPreview({ data, username, isPreview = false }: CardPreviewProps) {
+export default function CardPreview({ data, username, isPreview = false, imageBaseUrl = "" }: CardPreviewProps) {
   const {
     businessName,
     brandManager,
@@ -44,6 +53,16 @@ export default function CardPreview({ data, username, isPreview = false }: CardP
 
   const themeHex = design?.colorTheme || "#3B82F6";
   const template = design?.template || "modern";
+
+  // تبدیل مسیر نسبی آپلودی (/uploads/...) به آدرس کامل، وقتی این کامپوننت
+  // روی یک دامنه‌ی دیگر (card.youkart.ir) رندر می‌شود. اگر آدرس از قبل مطلق
+  // باشد (http/https) یا imageBaseUrl خالی باشد (حالت پیش‌فرض داشبورد
+  // هم‌دامنه)، دست‌نخورده برمی‌گردد.
+  const resolveImg = (path?: string): string => {
+    if (!path) return "";
+    if (/^https?:\/\//.test(path) || !imageBaseUrl) return path;
+    return `${imageBaseUrl}${path.startsWith("/") ? "" : "/"}${path}`;
+  };
   
   // State for Dark Mode
   const [localIsDark, setLocalIsDark] = useState(design?.isDark ?? false);
@@ -96,7 +115,7 @@ export default function CardPreview({ data, username, isPreview = false }: CardP
   const handleInteraction = async (type: string, url?: string) => {
     if (isPreview) return;
     try {
-      await apiFetch(`/api/card/${username}/click`, { method: "POST" });
+      await fetch(`/api/card/${username}/click`, { method: "POST" });
     } catch (e) {
       console.error(e);
     }
@@ -113,8 +132,8 @@ export default function CardPreview({ data, username, isPreview = false }: CardP
   };
 
   const getDayStatus = () => {
-    const daysWeek = ["جمعه", "شنبه", "یکشنبه", "دوشنبه", "سه شنبه", "چهارشنبه", "پنجشنبه"];
-    const todayStr = daysWeek[new Date().getDay()];
+    // نام روز هفته به وقت تهران (نه timezone سرور) — رفع باگ ترتیب/timezone
+    const todayStr = getTehranDayName();
     const todaySchedule = workingDays?.[todayStr];
 
     if (!todaySchedule || !todaySchedule.isOpen || todaySchedule.isClosed) {
@@ -199,7 +218,7 @@ export default function CardPreview({ data, username, isPreview = false }: CardP
           {/* Header Section */}
           <header className="relative pt-4 pb-6 px-4 shadow-sm min-h-[350px] overflow-hidden">
             {bgImageUrl ? (
-              <img src={bgImageUrl} alt="پس‌زمینه" className={`absolute inset-0 w-full h-full object-cover object-center transition-opacity z-0 ${mode("opacity-50", "opacity-30")}`} referrerPolicy="no-referrer" />
+              <img src={resolveImg(bgImageUrl)} alt="پس‌زمینه" className={`absolute inset-0 w-full h-full object-cover object-center transition-opacity z-0 ${mode("opacity-50", "opacity-30")}`} referrerPolicy="no-referrer" />
             ) : (
               <div className={`absolute inset-0 w-full h-full transition-opacity z-0 ${mode("bg-gray-200 opacity-50", "bg-gray-800 opacity-30")}`}></div>
             )}
@@ -222,7 +241,7 @@ export default function CardPreview({ data, username, isPreview = false }: CardP
             <div className="w-24 h-24 mt-4 mb-1 flex items-center justify-center overflow-hidden">
               {logoUrl && (
                 <img
-                  src={logoUrl}
+                  src={resolveImg(logoUrl)}
                   alt="لوگو"
                   className="w-full h-full object-contain"
                   referrerPolicy="no-referrer"
@@ -483,7 +502,7 @@ export default function CardPreview({ data, username, isPreview = false }: CardP
                       >
                         <div className={`w-full h-32 rounded-xl overflow-hidden mb-3 relative ${mode("bg-gray-50", "bg-gray-900")}`}>
                           {p.imageUrl ? (
-                            <img src={p.imageUrl} alt={p.title} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                            <img src={resolveImg(p.imageUrl)} alt={p.title} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                           ) : (
                             <div className="w-full h-full flex items-center justify-center text-xs text-gray-400">بدون تصویر</div>
                           )}
@@ -515,7 +534,7 @@ export default function CardPreview({ data, username, isPreview = false }: CardP
                 <div ref={galleryRef} className="flex gap-3 overflow-x-auto hide-scrollbar w-full snap-x pb-2">
                   {infiniteGallery.map((imgUrl, idx) => (
                     <div key={`gallery-${idx}`} className="carousel-item opacity-100 scale-100 shrink-0 w-[75%] h-40 rounded-2xl overflow-hidden snap-center shadow-md relative">
-                      <img src={imgUrl} className="w-full h-full object-cover" alt={`گالری ${idx + 1}`} referrerPolicy="no-referrer" />
+                      <img src={resolveImg(imgUrl)} className="w-full h-full object-cover" alt={`گالری ${idx + 1}`} referrerPolicy="no-referrer" />
                     </div>
                   ))}
                 </div>

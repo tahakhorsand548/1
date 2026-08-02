@@ -1,6 +1,6 @@
 import React from "react";
 import { CardData } from "../types";
-import CardPreview from "./CardPreview";
+import { CardPreview } from "@youkart/card-components";
 
 interface IPhoneMockupProps {
   data: CardData;

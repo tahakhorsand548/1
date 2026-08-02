@@ -5,8 +5,16 @@
 // همزمان (cluster) باعث می‌شود کاربران بسته به این‌که به کدام instance وصل
 // شده باشند، پیام‌های realtime یا محدودیت نرخ متفاوتی ببینند.
 //
+// ⚠️ نکته مهم (بعد از راه‌اندازی پکیج مشترک @youkart/card-components):
+// این پروژه دیگر با «npm install» تنها داخل همین پوشه کار نمی‌کند — باید از
+// ریشه‌ی مونوریپو نصب شود تا لینک پکیج مشترک (packages/card-components) هم
+// ساخته شود.
+//
 // ── نحوه اجرا روی سرور ──────────────────────────────────────────────────────
-//   npm run build                 # ساخت نسخه production (dist/server.cjs + build فرانت‌اند)
+//   cd /path/to/repo-root          # نه داخل digital-card!
+//   npm install                    # نصب هر سه workspace با هم
+//   npm run build --workspace=digital-card
+//   cd digital-card
 //   pm2 start ecosystem.config.js --env production
 //   pm2 save                      # ذخیره وضعیت فعلی فرآیندها
 //   pm2 startup                   # دستور چاپ‌شده توسط این خط را یک‌بار با sudo اجرا کنید
